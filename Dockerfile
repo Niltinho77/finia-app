@@ -10,7 +10,12 @@ RUN npm install -g pnpm
 RUN pnpm install
 
 # Copia o restante do projeto
-COPY . .
+COPY package*.json ./
+RUN pnpm install
+COPY prisma ./prisma
+COPY src ./src
+COPY tsconfig.json ./
+RUN pnpm build
 
 # Gera Prisma Client antes de compilar
 RUN pnpm prisma generate
