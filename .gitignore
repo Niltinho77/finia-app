@@ -10,3 +10,4 @@ dist/
 # editor
 .vscode/
 .DS_Store
+.cert.txt
