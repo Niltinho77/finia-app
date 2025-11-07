@@ -7,9 +7,9 @@ import ptBr from "dayjs/locale/pt-br.js";
 import isoWeek from "dayjs/plugin/isoWeek.js";
 import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
-import { extrairDataEHora } from "../utils/dateExtractor";
-import { gerarGraficoPizza } from "../utils/chartGenerator";
-import { sendImageFile } from "../services/whatsappService";
+import { extrairDataEHora } from "../utils/dateExtractor.js";
+import { gerarGraficoPizza } from "../utils/chartGenerator.js";
+import { sendImageFile } from "../services/whatsappService.js";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);

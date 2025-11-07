@@ -1,9 +1,9 @@
 // src/server.ts
 import express from "express";
 import dotenv from "dotenv";
-import whatsappRouter from "./routes/whatsapp";
-import iaRouter from "./routes/ia";
-import indexRouter from "./routes/index";
+import whatsappRouter from "./routes/whatsapp.js";
+import iaRouter from "./routes/ia.js";
+import indexRouter from "./routes/index.js";
 
 dotenv.config();
 

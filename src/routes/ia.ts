@@ -1,7 +1,7 @@
 import express, { Router } from "express";
 import type { Request, Response } from "express";
-import { interpretarMensagem } from "../services/iaService";
-import { processarComando } from "../services/finiaCore";
+import { interpretarMensagem } from "../services/iaService.js";
+import { processarComando } from "../services/finiaCore.js";
 
 export const iaRouter = Router();
 
