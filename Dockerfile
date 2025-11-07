@@ -12,8 +12,6 @@ RUN pnpm install
 # Copia o restante do código
 COPY . .
 
-# Gera build TypeScript
-RUN pnpm build
 
 # ======================
 # Etapa 2: Execução
@@ -30,6 +28,9 @@ RUN pnpm install --prod
 
 # Prisma generate
 RUN pnpm prisma generate
+
+# Gera build TypeScript
+RUN pnpm build
 
 EXPOSE 3000
 CMD ["node", "dist/server.js"]

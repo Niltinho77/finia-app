@@ -186,12 +186,12 @@ async function resumoTransacoes(
 
   // 🔹 Totais do período
   const totalEntradas = transacoes
-    .filter((t) => t.tipo === "ENTRADA")
-    .reduce((s, t) => s + t.valor, 0);
+  .filter((t: any) => t.tipo === "ENTRADA")
+  .reduce((s: number, t: any) => s + t.valor, 0);
 
   const totalSaidas = transacoes
-    .filter((t) => t.tipo === "SAIDA")
-    .reduce((s, t) => s + t.valor, 0);
+    .filter((t: any) => t.tipo === "SAIDA")
+    .reduce((s: number, t: any) => s + t.valor, 0);
 
   const saldoPeriodo = totalEntradas - totalSaidas;
 
