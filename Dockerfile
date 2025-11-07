@@ -1,44 +1,32 @@
-# ======================
-# Etapa 1: Build (compila o TypeScript e gera Prisma Client)
-# ======================
+# Etapa 1 - Build
 FROM node:20-alpine AS builder
+
 WORKDIR /app
 
-# Copia pacotes e instala dependências
-COPY package.json pnpm-lock.yaml* ./
+# Copia apenas os arquivos essenciais
+COPY package*.json ./
 RUN npm install -g pnpm
 RUN pnpm install
 
-# Copia o restante do projeto
-COPY package*.json ./
-RUN pnpm install
+# Copia o restante do código
 COPY prisma ./prisma
 COPY src ./src
 COPY tsconfig.json ./
-RUN pnpm build
 
-# Gera Prisma Client antes de compilar
+# Gera o Prisma Client e compila TypeScript
 RUN pnpm prisma generate
-
-# Compila o projeto TypeScript
 RUN pnpm build
 
-# ======================
-# Etapa 2: Run (produção)
-# ======================
+# Etapa 2 - Runtime
 FROM node:20-alpine AS runner
+
 WORKDIR /app
 
-# Copia apenas os artefatos necessários do build
+# Copia arquivos necessários da build
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/.env ./.env
+COPY prisma ./prisma
 
-# Porta padrão usada pela Railway
-ENV PORT=3000
+# Railway já injeta as variáveis de ambiente automaticamente
 EXPOSE 3000
-
-# Comando para iniciar o servidor
 CMD ["node", "dist/server.js"]
