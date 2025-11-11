@@ -163,7 +163,7 @@ async function resumoTransacoes(
   periodo: Periodo,
   filtroTipo: "ENTRADA" | "SAIDA" | null
 ) {
-  // 🔎 Transações do período
+  // 🔎 Busca transações do período
   const transacoes = await prisma.transacao.findMany({
     where: {
       usuarioId,
@@ -171,7 +171,6 @@ async function resumoTransacoes(
       valor: { gt: 0 },
     },
     include: { categoria: true },
-    orderBy: { data: "desc" },
   });
 
   if (transacoes.length === 0) {
@@ -186,14 +185,12 @@ async function resumoTransacoes(
 
   // 🔹 Totais do período
   const totalEntradas = transacoes
-  .filter((t: any) => t.tipo === "ENTRADA")
-  .reduce((s: number, t: any) => s + t.valor, 0);
+    .filter((t) => t.tipo === "ENTRADA")
+    .reduce((s, t) => s + t.valor, 0);
 
   const totalSaidas = transacoes
-    .filter((t: any) => t.tipo === "SAIDA")
-    .reduce((s: number, t: any) => s + t.valor, 0);
-
-  const saldoPeriodo = totalEntradas - totalSaidas;
+    .filter((t) => t.tipo === "SAIDA")
+    .reduce((s, t) => s + t.valor, 0);
 
   // 🔹 Totais gerais (saldo acumulado)
   const todasTransacoes = await prisma.transacao.findMany({
@@ -210,51 +207,24 @@ async function resumoTransacoes(
 
   const saldoAtual = totalGeralEntradas - totalGeralSaidas;
 
-  // 🔹 Filtro de tipo
-  const filtradas = filtroTipo
-    ? transacoes.filter((t) => t.tipo === filtroTipo)
-    : transacoes;
-
-  // 🔹 Agrupa por categoria
-  const porCategoria = new Map<string, number>();
-  for (const t of filtradas) {
-    const nome = t.categoria?.nome || "Outros";
-    porCategoria.set(nome, (porCategoria.get(nome) || 0) + t.valor);
-  }
-
-  const topCategorias = [...porCategoria.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
-
-  const linhasCategorias = topCategorias
-    .map(([nome, v]) => `• ${nome}: ${formatarValor(v)}`)
-    .join("\n");
-
-  // 🔹 Últimas 5 transações
-  const ultimasTransacoes = filtradas
-    .slice(0, 5)
-    .map(
-      (t) =>
-        `• ${dayjs(t.data).format("DD/MM")} — ${t.descricao} ${formatarValor(
-          t.valor
-        )} ${t.tipo === "ENTRADA" ? "💰" : "📤"}`
-    )
-    .join("\n");
-
-  // 🔹 Define título
-  const tituloTipo =
-    filtroTipo === "SAIDA"
-      ? "Gastos"
-      : filtroTipo === "ENTRADA"
-      ? "Entradas"
-      : "Resumo financeiro";
-
   const periodoFmt = `${dayjs(periodo.inicio).format("DD/MM")} — ${dayjs(
     periodo.fim
   ).format("DD/MM")}`;
 
-  // 🧠 Gera gráfico
+  // 🔹 Gera gráfico apenas das SAÍDAS (gastos)
   try {
+    const gastos = transacoes.filter((t) => t.tipo === "SAIDA");
+    const porCategoria = new Map<string, number>();
+
+    for (const t of gastos) {
+      const nome = t.categoria?.nome || "Outros";
+      porCategoria.set(nome, (porCategoria.get(nome) || 0) + t.valor);
+    }
+
+    const topCategorias = [...porCategoria.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+
     const categorias = topCategorias.map(([nome]) => nome);
     const valores = topCategorias.map(([, v]) => v);
 
@@ -263,31 +233,22 @@ async function resumoTransacoes(
       await sendImageFile(
         usuarioTelefone,
         chartPath,
-        "📊 Distribuição por categoria"
+        "📊 Distribuição de gastos por categoria"
       );
     }
   } catch (err: any) {
     console.error("⚠️ Falha ao gerar/enviar gráfico:", err?.message || err);
   }
 
-  // 🧾 Mensagem final
-  return `📊 *${tituloTipo} ${periodo.label}*
+  // 🧾 Mensagem final simplificada
+  return `📊 *Resumo financeiro ${periodo.label}*
 
-💰 *Saldo do período:* ${formatarValor(saldoPeriodo)}
 💵 *Saldo atual:* ${formatarValor(saldoAtual)}
 
-📈 *Entradas:* ${formatarValor(totalEntradas)}
-📉 *Saídas:* ${formatarValor(totalSaidas)}
+📈 *Entradas (${periodo.label}):* ${formatarValor(totalEntradas)}
+📉 *Saídas (${periodo.label}):* ${formatarValor(totalSaidas)}
 
-📅 *Período:* ${periodoFmt}
-
-🏷️ *Principais categorias:*
-${linhasCategorias || "—"}
-
-🧾 *Últimas 5 transações:*
-${ultimasTransacoes || "—"}
-
-📎 *Dica:* envie "todas as transações ${periodo.label}" para ver o extrato completo.`;
+📅 *Período:* ${periodoFmt}`;
 }
 
 
