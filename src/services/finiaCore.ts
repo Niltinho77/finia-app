@@ -270,6 +270,60 @@ export async function processarComando(comando: any, telefone: string) {
   const textoBruto = comando.textoOriginal || comando.descricao || "";
   console.log("🧩 processando comando:", comando);
 
+// 🚧 Filtra mensagens que não têm relação com o app (financeiro OU tarefas)
+  const textoFiltrado = textoBruto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  // 💰 Palavras relacionadas a finanças
+  const palavrasFinanceiras = [
+    "gasto", "gastei", "despesa", "compra", "paguei", "pagamento", "conta", "pix",
+    "transferencia", "deposito", "credito", "debito", "entrada", "recebi", "ganhei",
+    "salario", "venda", "lucro", "faturamento", "investimento", "resumo", "extrato",
+    "relatorio", "balanco", "saldo", "total", "analise", "grafico"
+  ];
+
+  // 📅 Palavras relacionadas a tarefas / rotina / agendamento
+  const palavrasTarefas = [
+    "tarefa", "tarefas", "lembrete", "anotacao", "agenda", "reuniao", "compromisso",
+    "evento", "planejar", "planejamento", "meta", "objetivo", "fazer", "lavar", "estudar",
+    "ir", "buscar", "ligar", "enviar", "organizar", "preparar", "visitar", "lembrar",
+    "amanha", "hoje", "ontem", "semana", "mes", "horario", "hora", "data"
+  ];
+
+  // 👋 Palavras sem relevância (cumprimentos e ruídos)
+  const palavrasIrrelevantes = [
+    "oi", "ola", "olá", "bom dia", "boa tarde", "boa noite", "e ai", "tudo bem",
+    "blz", "beleza", "kk", "kkk", "haha", "rs", "rsrs", "ok", "👍", "tchau", "vlw"
+  ];
+
+  // Verifica se é uma interação de contexto útil
+  const ehFinanceiro = palavrasFinanceiras.some(p => textoFiltrado.includes(p));
+  const ehTarefa = palavrasTarefas.some(p => textoFiltrado.includes(p));
+  const ehSaudacao = palavrasIrrelevantes.some(p => textoFiltrado.includes(p));
+
+  // 🔎 Se não for financeiro nem tarefa (e também não saudação curta) → resposta padrão
+  if (!ehFinanceiro && !ehTarefa) {
+    // evita responder algo bobo tipo "kk" com o texto longo
+    if (ehSaudacao || textoFiltrado.length < 5) {
+      return "👋 Oi! Tudo bem? Pode me dizer o que deseja fazer? 😊";
+    }
+
+    return (
+      "🤖 Oi! Eu sou a *Lume*, sua assistente financeira. 😊\n\n" +
+      "Posso te ajudar a *registrar um gasto ou ganho*, *consultar seu resumo financeiro* ou *criar uma tarefa*.\n" +
+      "Exemplos:\n" +
+      "• 💸 'Gastei 50 reais com mercado'\n" +
+      "• 📊 'Quanto gastei este mês?'\n" +
+      "• 🧽 'Lavar o carro amanhã às 13h'\n" +
+      "• 📅 'Adicionar reunião terça às 10h'\n\n" +
+      "Tente mandar algo nesse formato que eu entendo rapidinho!"
+    );
+  }
+
+
+
   // garante usuário
   let usuario = await prisma.usuario.findUnique({ where: { telefone } });
   if (!usuario) {
