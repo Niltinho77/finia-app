@@ -7,34 +7,22 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum PlanoUsuario {
-  TRIAL
-  PREMIUM
-  TESTER
-  BLOQUEADO
-}
-
 model Usuario {
-  id              String          @id @default(cuid())
+  id              String        @id @default(cuid())
   nome            String?
-  telefone        String          @unique
-  idioma          String?         @default("pt-BR")
-  ativo           Boolean         @default(true)
-  criadoEm        DateTime        @default(now())
-  atualizadoEm    DateTime        @updatedAt
-
-  transacoes      Transacao[]
-  tarefas         Tarefa[]
-  interacoesIA    InteracaoIA[]
-
-  // 🔹 Gerenciamento de plano
-  plano           PlanoUsuario?   @default(TRIAL)
-  trialAtivadoEm  DateTime?       @default(now())
+  telefone        String        @unique
+  idioma          String?       @default("pt-BR")
+  ativo           Boolean       @default(true)
+  criadoEm        DateTime      @default(now())
+  atualizadoEm    DateTime      @updatedAt
+  plano           String?       @default("free")
   trialExpiraEm   DateTime?
   premiumExpiraEm DateTime?
-  tester          Boolean         @default(false)
+  tester          Boolean       @default(false)
+  interacoesIA    InteracaoIA[]
+  tarefas         Tarefa[]
+  transacoes      Transacao[]
 }
-
 
 model Categoria {
   id         String        @id @default(cuid())

@@ -28,14 +28,14 @@ export async function validarPlano(telefone: string) {
   if (!usuario) {
     const agora = dayjs();
     usuario = await prisma.usuario.create({
-      data: {
-        telefone,
-        nome: `Usuário ${telefone}`,
-        plano: "TRIAL",
-        trialAtivadoEm: agora.toDate(),
-        trialExpiraEm: agora.add(3, "day").toDate(),
-      },
-    });
+    data: {
+      telefone,
+      nome: `Usuário ${telefone}`,
+      plano: "TRIAL",
+      trialExpiraEm: agora.add(3, "day").toDate(),
+    },
+  });
+
   }
 
   const agora = dayjs();
@@ -339,6 +339,22 @@ export async function processarComando(comando: any, telefone: string) {
       data: { telefone, nome: `Usuário ${telefone}` },
     });
   }
+
+  if (!usuario.trialExpiraEm) {
+  const trialFim = dayjs().add(3, "day").format("DD/MM");
+  return (
+    "👋 Olá! Eu sou a *Lume*, sua assistente financeira. 😊\n\n" +
+    "Você acaba de iniciar seu período de *teste gratuito de 3 dias*!\n" +
+    `🗓️ O teste expira em *${trialFim}*.\n\n` +
+    "Durante o teste, você pode:\n" +
+    "• 💸 Registrar até 10 transações\n" +
+    "• 📝 Criar até 10 tarefas\n" +
+    "• 📊 Gerar 1 relatório semanal\n\n" +
+    "👉 Quando quiser liberar tudo, ative o plano PREMIUM em https://finia.app/assinar"
+  );
+}
+
+
   // 🧾 Verifica plano e aplica limites do plano FREE
   const agora = dayjs();
   const isTrial = usuario.plano === "TRIAL" && usuario.trialExpiraEm && agora.isBefore(usuario.trialExpiraEm);
