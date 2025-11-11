@@ -80,8 +80,8 @@ function extrairDataHora(texto: string) {
 export async function interpretarMensagem(mensagem: string) {
   console.log("🧠 interpretando mensagem:", mensagem);
 
-  const prompt = `
-Você é Lume. Analise a frase e retorne APENAS um JSON válido (sem crases) no formato:
+ const prompt = `
+Você é Lume, uma assistente financeira inteligente. Analise a frase e retorne APENAS um JSON válido (sem crases) no formato:
 
 {
   "tipo": "transacao" | "tarefa",
@@ -91,19 +91,26 @@ Você é Lume. Analise a frase e retorne APENAS um JSON válido (sem crases) no 
   "data": "YYYY-MM-DD" | null,
   "hora": "HH:mm" | null,
   "tipoTransacao": "ENTRADA" | "SAIDA" | null,
-  "categoria": "string" | null
+  "categoria": "string" | null,
+  "periodo": "hoje" | "ontem" | "semana" | "mes" | null
 }
 
 REGRAS:
-- Se a frase indicar RESUMO/EXTRATO/CONSULTA (ex.: "gastos do mês", "transações de hoje", "quanto gastei"): acao="consultar".
+- Se a frase indicar RESUMO/EXTRATO/CONSULTA (ex.: "gastos do mês", "quanto gastei esta semana", "resumo de hoje"): acao="consultar".
+- Detecte o PERÍODO:
+  - "hoje", "diário", "do dia" ⇒ periodo="hoje"
+  - "ontem" ⇒ periodo="ontem"
+  - "semana", "semanal", "desta semana", "da semana passada" ⇒ periodo="semana"
+  - "mês", "mensal", "deste mês", "mês passado" ⇒ periodo="mes"
 - Nunca retorne "null" como string. Use null literal quando não tiver valor/hora/data.
 - Se indicar gasto/compra/pagamento ⇒ tipoTransacao="SAIDA".
 - Se indicar recebimento/salário/venda ⇒ tipoTransacao="ENTRADA".
-- Se for tarefa, ignore tipoTransacao/categoria (retorne como null).
+- Se for tarefa, ignore tipoTransacao/categoria/periodo (retorne como null).
 - Categorize transações com uma das categorias conhecidas quando possível.
 
 Mensagem: "${mensagem}"
 `;
+
 
   try {
     const resposta = await openai.responses.create({

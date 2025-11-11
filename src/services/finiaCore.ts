@@ -353,29 +353,71 @@ export async function processarComando(comando: any, telefone: string) {
 
   try {
     /** ============== TRANSACOES ============== */
-    if (tipo === "transacao") {
-      // ================= CONSULTAR =================
-      if (acao === "consultar") {
-        const periodoFinal =
-          periodo ||
-          (/\bm[eê]s\b/.test(textoOriginal)
-            ? {
-                inicio: dayjs().startOf("month").toDate(),
-                fim: dayjs().endOf("month").toDate(),
-                label: "de " + dayjs().format("MMMM"),
-              }
-            : {
-                inicio: dayjs().startOf("day").toDate(),
-                fim: dayjs().endOf("day").toDate(),
-                label: "de hoje",
-              });
+    if (acao === "consultar") {
+      // 🧭 1️⃣ Detecta o período textual ou o enviado pela IA
+      let periodoFinal = detectarPeriodo(textoOriginal);
+      const agora = dayjs();
 
-        return await resumoTransacoes(
-          usuario.id,
-          usuario.telefone,
-          periodoFinal,
-          tipoInferido
-        );
+      // Se a IA tiver retornado "periodo": "semana" | "mes" | "hoje" | "ontem", trata aqui
+      if (!periodoFinal && comando.periodo) {
+        switch (comando.periodo) {
+          case "semana":
+            periodoFinal = {
+              inicio: agora.startOf("isoWeek").toDate(),
+              fim: agora.endOf("isoWeek").toDate(),
+              label: "desta semana",
+            };
+            break;
+
+          case "mes":
+            periodoFinal = {
+              inicio: agora.startOf("month").toDate(),
+              fim: agora.endOf("month").toDate(),
+              label: "deste mês",
+            };
+            break;
+
+          case "ontem":
+            periodoFinal = {
+              inicio: agora.subtract(1, "day").startOf("day").toDate(),
+              fim: agora.subtract(1, "day").endOf("day").toDate(),
+              label: "de ontem",
+            };
+            break;
+
+          case "hoje":
+          default:
+            periodoFinal = {
+              inicio: agora.startOf("day").toDate(),
+              fim: agora.endOf("day").toDate(),
+              label: "de hoje",
+            };
+            break;
+        }
+      }
+
+      // 2️⃣ Fallback padrão — se nada foi detectado
+      if (!periodoFinal) {
+        const t = textoOriginal;
+        if (/\bseman(a|al)\b/.test(t)) {
+          periodoFinal = {
+            inicio: agora.startOf("isoWeek").toDate(),
+            fim: agora.endOf("isoWeek").toDate(),
+            label: "desta semana",
+          };
+        } else if (/\bm(e|ê)s\b|\bmensal\b/.test(t)) {
+          periodoFinal = {
+            inicio: agora.startOf("month").toDate(),
+            fim: agora.endOf("month").toDate(),
+            label: "deste mês",
+          };
+        } else {
+          periodoFinal = {
+            inicio: agora.startOf("day").toDate(),
+            fim: agora.endOf("day").toDate(),
+            label: "de hoje",
+          };
+        }
       }
 
       // ================= INSERIR =================
