@@ -34,10 +34,12 @@ export function extrairDataEHora(texto: string): { data: Date | null; hora: stri
     return { data: null, hora: null };
   }
 
-  const d = dayjs(resultado);
-  const hora = d.hour() || d.minute()
-    ? `${String(d.hour()).padStart(2, "0")}:${String(d.minute()).padStart(2, "0")}`
-    : null;
+  // 🔧 Corrige o problema do fuso: subtrai 1 dia para alinhar com horário real do Brasil
+const d = dayjs(resultado).subtract(1, "day");
 
-  return { data: d.toDate(), hora };
+const hora = d.hour() || d.minute()
+  ? `${String(d.hour()).padStart(2, "0")}:${String(d.minute()).padStart(2, "0")}`
+  : null;
+
+return { data: d.toDate(), hora };
 }
