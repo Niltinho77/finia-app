@@ -624,11 +624,15 @@ ${tipoEmoji} *Tipo:* ${
       // se ainda não tem hora, usa a que veio do JSON
       if (!horaFinal && hora && /^\d{1,2}:\d{2}$/.test(hora)) horaFinal = hora;
 
-      // evita datas no passado
-      if (dataTarefa.tz("America/Sao_Paulo").isBefore(agora.tz("America/Sao_Paulo"), "day")) {
-        console.log("⚙️ Corrigindo data antiga da IA:", dataTarefa.format("DD/MM/YYYY"), "→", agora.add(1, "day").format("DD/MM/YYYY"));
-        dataTarefa = agora.add(1, "day");
+      // ✅ Corrige apenas se a data for *antes* de hoje (não o mesmo dia)
+      const hoje = agora.tz("America/Sao_Paulo").startOf("day");
+      const dataLocal = dataTarefa.tz("America/Sao_Paulo").startOf("day");
+
+      if (dataLocal.isBefore(hoje)) {
+        console.log("⚙️ Corrigindo data antiga da IA:", dataTarefa.format("DD/MM/YYYY"), "→", hoje.format("DD/MM/YYYY"));
+        dataTarefa = hoje; // usa o dia atual, não amanhã
       }
+
 
 
       // cria tarefa
