@@ -353,6 +353,8 @@ export async function processarComando(comando: any, telefone: string) {
 
   try {
     /** ============== TRANSACOES ============== */
+    if (tipo === "transacao") {
+      // ================= CONSULTAR =================
     if (acao === "consultar") {
       // 🧭 1️⃣ Detecta o período textual ou o enviado pela IA
       let periodoFinal = detectarPeriodo(textoOriginal);
@@ -419,6 +421,16 @@ export async function processarComando(comando: any, telefone: string) {
           };
         }
       }
+
+      // 3️⃣ Executa o resumo
+      return await resumoTransacoes(
+        usuario.id,
+        usuario.telefone,
+        periodoFinal,
+        tipoInferido
+      );
+    }
+
 
       // ================= INSERIR =================
       if (acao === "inserir") {
