@@ -316,7 +316,7 @@ if (usuario.plano === "TRIAL") {
 
   // 🧾 Limite de lançamentos (10)
   if (comando.tipo === "transacao" && comando.acao === "inserir" && totalTransacoes >= 10) {
-    return (
+    throw new Error(
       "📈 Você atingiu o limite de *10 lançamentos* do período de teste gratuito.\n\n" +
       "💎 *Ative o Plano PREMIUM* e continue registrando seus gastos ilimitadamente:\n" +
       "👉 https://finia.app/assinar"
@@ -325,7 +325,7 @@ if (usuario.plano === "TRIAL") {
 
   // 📊 Limite de relatórios (1)
   if (comando.tipo === "transacao" && comando.acao === "consultar" && totalRelatorios >= 1) {
-    return (
+    throw new Error(
       "📊 Você já utilizou o seu *relatório gratuito* do período de teste.\n\n" +
       "💎 Assine o *Plano PREMIUM* para acessar relatórios e gráficos ilimitados:\n" +
       "👉 https://finia.app/assinar"
@@ -334,7 +334,7 @@ if (usuario.plano === "TRIAL") {
 
   // 🎙️ Limite de áudios (2)
   if (comando.tipo === "voz" && totalAudios >= 2) {
-    return (
+    throw new Error(
       "🎧 Você já usou seus *2 áudios gratuitos* do teste.\n\n" +
       "💎 Ative o *Plano PREMIUM* para continuar usando comandos por voz:\n" +
       "👉 https://finia.app/assinar"
