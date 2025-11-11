@@ -279,6 +279,9 @@ export async function processarComando(comando: any, telefone: string) {
   const textoBruto = comando.textoOriginal || comando.descricao || "";
   console.log("🧩 processando comando:", comando);
 
+  // ✅ Garante que o plano/trial esteja configurado antes de continuar
+  await validarPlano(telefone);
+
 // 🚧 Filtra mensagens que não têm relação com o app (financeiro OU tarefas)
   const textoFiltrado = textoBruto
     .normalize("NFD")
