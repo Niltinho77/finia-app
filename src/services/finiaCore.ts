@@ -334,7 +334,7 @@ if (ehSaudacaoSimples) {
 
   // 💰 Palavras relacionadas a finanças
   const palavrasFinanceiras = [
-    "gasto", "gastei", "despesa", "compra", "paguei", "pagamento", "conta", "pix",
+    "gasto", "gastei", "despesa", "compra", "comprei", "paguei", "pagamento", "conta", "pix",
     "transferencia", "deposito", "credito", "debito", "entrada", "recebi", "ganhei",
     "salario", "venda", "lucro", "faturamento", "investimento", "resumo", "extrato",
     "relatorio", "balanco", "saldo", "total", "analise", "grafico"
