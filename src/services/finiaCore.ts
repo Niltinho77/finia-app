@@ -24,9 +24,17 @@ const prisma = new PrismaClient();
 export async function validarPlano(telefone: string) {
   let usuario = await prisma.usuario.findUnique({ where: { telefone } });
 
+  // 🆕 Se não existir, cria TRIAL de 3 dias automaticamente
   if (!usuario) {
+    const agora = dayjs();
     usuario = await prisma.usuario.create({
-      data: { telefone, nome: `Usuário ${telefone}` },
+      data: {
+        telefone,
+        nome: `Usuário ${telefone}`,
+        plano: "TRIAL",
+        trialAtivadoEm: agora.toDate(),
+        trialExpiraEm: agora.add(3, "day").toDate(),
+      },
     });
   }
 
@@ -36,20 +44,21 @@ export async function validarPlano(telefone: string) {
   const isTrial = usuario.trialExpiraEm && agora.isBefore(usuario.trialExpiraEm);
   const isPremium = usuario.premiumExpiraEm && agora.isBefore(usuario.premiumExpiraEm);
 
-  const autorizado = isTester || isTrial || isPremium || usuario.plano === "free";
+  // 🔒 Determina se o usuário ainda tem acesso ativo
+  const autorizado = isTester || isTrial || isPremium;
 
-  // 🔄 Atualiza automaticamente planos expirados
-  if (usuario.plano === "premium" && !isPremium) {
+  // 🔄 Atualiza planos expirados automaticamente
+  if (usuario.plano === "PREMIUM" && !isPremium) {
     await prisma.usuario.update({
       where: { id: usuario.id },
-      data: { plano: "free", premiumExpiraEm: null },
+      data: { plano: "BLOQUEADO", premiumExpiraEm: null },
     });
   }
 
-  if (usuario.plano === "trial" && !isTrial) {
+  if (usuario.plano === "TRIAL" && !isTrial) {
     await prisma.usuario.update({
       where: { id: usuario.id },
-      data: { plano: "free", trialExpiraEm: null },
+      data: { plano: "BLOQUEADO", trialExpiraEm: null },
     });
   }
 
@@ -332,55 +341,36 @@ export async function processarComando(comando: any, telefone: string) {
   }
   // 🧾 Verifica plano e aplica limites do plano FREE
   const agora = dayjs();
-  const isTester = usuario.tester === true;
-  const isTrial = usuario.trialExpiraEm && agora.isBefore(usuario.trialExpiraEm);
-  const isPremium = usuario.premiumExpiraEm && agora.isBefore(usuario.premiumExpiraEm);
-  const isFree = usuario.plano === "free" && !isTester && !isTrial && !isPremium;
+  const isTrial = usuario.plano === "TRIAL" && usuario.trialExpiraEm && agora.isBefore(usuario.trialExpiraEm);
+  const isPremium = usuario.plano === "PREMIUM" && usuario.premiumExpiraEm && agora.isBefore(usuario.premiumExpiraEm);
+  const isTester = usuario.plano === "TESTER" || usuario.tester === true;
+  const isBloqueado = usuario.plano === "BLOQUEADO" && !isTester;
+
+  const planoAtivo = isTrial || isPremium || isTester;
+
   
   let { tipo, acao, descricao, valor, data, hora, tipoTransacao, categoria } = comando;
 
   // 🔒 Bloqueios e limites do plano FREE
-  if (isFree) {
+  if (!planoAtivo) {
+    return (
+      "🚫 *Seu plano expirou!*\n\n" +
+      "💎 Ative o *Plano PREMIUM* para continuar usando o Finia sem limites:\n" +
+      "👉 https://finia.app/assinar"
+    );
+  }
+
+  if (isTrial) {
     const totalTransacoes = await prisma.transacao.count({ where: { usuarioId: usuario.id } });
-    const totalTarefas = await prisma.tarefa.count({ where: { usuarioId: usuario.id } });
-    const totalRelatorios = await prisma.interacaoIA?.count?.({
-      where: { usuarioId: usuario.id, tipo: "CONSULTA" },
-    }).catch(() => 0) ?? 0; // fallback caso tabela não exista
-
-    // 🚫 Bloqueia áudios
-    if (comando.tipo === "audio" || comando.tipo === "voz") {
-      return "🎤 O plano gratuito não permite mensagens de voz.\n💎 Ative o plano PREMIUM em https://finia.app/assinar";
-    }
-
-    // 🚫 Transações
-    if (tipo === "transacao" && acao === "inserir" && totalTransacoes >= 5) {
+    if (totalTransacoes >= 10) {
       return (
-        "🚫 *Limite atingido!*\n" +
-        "O plano gratuito permite até 5 transações.\n\n" +
-        "💎 *Desbloqueie transações ilimitadas* com o plano PREMIUM:\n" +
+        "📈 Você atingiu o limite de 10 transações do período de teste.\n" +
+        "💎 *Ative o Plano PREMIUM* e continue registrando seus gastos:\n" +
         "👉 https://finia.app/assinar"
-      );
-    }
-
-    // 🚫 Tarefas
-    if (tipo === "tarefa" && acao === "inserir" && totalTarefas >= 5) {
-      return (
-        "🚫 *Limite atingido!*\n" +
-        "O plano gratuito permite até 5 tarefas.\n\n" +
-        "💎 *Desbloqueie tarefas ilimitadas* com o plano PREMIUM:\n" +
-        "👉 https://finia.app/assinar"
-      );
-    }
-
-    // 🚫 Relatórios
-    if (acao === "consultar" && tipo === "transacao" && totalRelatorios >= 1) {
-      return (
-        "📊 *Você já gerou seu relatório gratuito!*\n" +
-        "Para ter relatórios detalhados e ilimitados:\n" +
-        "💎 *Ative o plano PREMIUM* em https://finia.app/assinar"
       );
     }
   }
+
 
   // extrai data e hora se for tarefa
   if (tipo === "tarefa" && acao === "inserir") {
