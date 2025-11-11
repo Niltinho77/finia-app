@@ -14,6 +14,7 @@ enum PlanoUsuario {
   BLOQUEADO
 }
 
+
 model Usuario {
   id              String          @id @default(cuid())
   nome            String?
