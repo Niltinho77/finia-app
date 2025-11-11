@@ -301,47 +301,6 @@ export async function processarComando(comando: any, telefone: string) {
   const { usuario } = await validarPlano(telefone);
 
   // 🔒 Regras de limitação do plano TRIAL
-if (usuario.plano === "TRIAL") {
-  const totalTransacoes = await prisma.transacao.count({
-    where: { usuarioId: usuario.id },
-  });
-
-  const totalRelatorios = await prisma.interacaoIA.count({
-    where: { usuarioId: usuario.id, tipo: "CONSULTA" },
-  });
-
-  const totalAudios = await prisma.interacaoIA.count({
-    where: { usuarioId: usuario.id, tipo: "OUTRO" },
-  });
-
-  // 🧾 Limite de lançamentos (10)
-  if (comando.tipo === "transacao" && comando.acao === "inserir" && totalTransacoes >= 10) {
-    throw new Error(
-      "📈 Você atingiu o limite de *10 lançamentos* do período de teste gratuito.\n\n" +
-      "💎 *Ative o Plano PREMIUM* e continue registrando seus gastos ilimitadamente:\n" +
-      "👉 https://finia.app/assinar"
-    );
-  }
-
-  // 📊 Limite de relatórios (1)
-  if (comando.tipo === "transacao" && comando.acao === "consultar" && totalRelatorios >= 1) {
-    throw new Error(
-      "📊 Você já utilizou o seu *relatório gratuito* do período de teste.\n\n" +
-      "💎 Assine o *Plano PREMIUM* para acessar relatórios e gráficos ilimitados:\n" +
-      "👉 https://finia.app/assinar"
-    );
-  }
-
-  // 🎙️ Limite de áudios (2)
-  if (comando.tipo === "voz" && totalAudios >= 2) {
-    throw new Error(
-      "🎧 Você já usou seus *2 áudios gratuitos* do teste.\n\n" +
-      "💎 Ative o *Plano PREMIUM* para continuar usando comandos por voz:\n" +
-      "👉 https://finia.app/assinar"
-    );
-  }
-}
-
 
 const textoFiltrado = textoBruto
   .normalize("NFD")
@@ -433,6 +392,55 @@ if (ehSaudacaoSimples) {
 
   
   let { tipo, acao, descricao, valor, data, hora, tipoTransacao, categoria } = comando;
+
+  // 🔒 Aplicar limites APÓS o comando estar normalizado
+if (usuario.plano === "TRIAL") {
+  // Conta o total de registros do usuário
+  const totalTransacoes = await prisma.transacao.count({
+    where: { usuarioId: usuario.id },
+  });
+
+  const totalRelatorios = await prisma.interacaoIA.count({
+    where: { usuarioId: usuario.id, tipo: "CONSULTA" },
+  });
+
+  const totalAudios = await prisma.interacaoIA.count({
+    where: {
+      usuarioId: usuario.id,
+      tipo: "OUTRO",
+      entradaTexto: { contains: "(audio" }, // identifica interações de voz
+    },
+  });
+
+  // 💸 1️⃣ Limite de lançamentos
+  if (tipo === "transacao" && acao === "inserir" && totalTransacoes >= 10) {
+    return (
+      "📈 Você atingiu o limite de *10 lançamentos* do teste gratuito.\n\n" +
+      "💎 *Ative o Plano PREMIUM* e continue registrando seus gastos:\n" +
+      "👉 https://finia.app/assinar"
+    );
+  }
+
+  // 📊 2️⃣ Limite de relatórios
+  if (tipo === "transacao" && acao === "consultar" && totalRelatorios >= 1) {
+    return (
+      "📊 Você já utilizou o seu *relatório gratuito* do teste.\n\n" +
+      "💎 Assine o *Plano PREMIUM* para relatórios ilimitados:\n" +
+      "👉 https://finia.app/assinar"
+    );
+  }
+
+  // 🎙️ 3️⃣ Limite de áudios
+  // (detecta que a mensagem veio de áudio pelo texto da transcrição ou interações anteriores)
+  if (comando.textoOriginal?.startsWith("(audio") && totalAudios >= 2) {
+    return (
+      "🎧 Você já usou seus *2 áudios gratuitos* do teste.\n\n" +
+      "💎 Ative o *Plano PREMIUM* para continuar usando comandos por voz:\n" +
+      "👉 https://finia.app/assinar"
+    );
+  }
+}
+
 
   // 🔒 Bloqueios e limites do plano FREE
   if (!planoAtivo) {
