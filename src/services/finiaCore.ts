@@ -1,5 +1,5 @@
 // src/services/finiaCore.ts
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Usuario } from "@prisma/client";
 import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat.js";
 import localizedFormat from "dayjs/plugin/localizedFormat.js";
@@ -21,11 +21,17 @@ dayjs.locale(ptBr);
 
 const prisma = new PrismaClient();
 
-export async function validarPlano(telefone: string) {
+// no topo do arquivo
+
+export async function validarPlano(telefone: string): Promise<{
+  autorizado: boolean;
+  usuario: Usuario; // <- não-nulo
+}> {
   let usuario = await prisma.usuario.findUnique({ where: { telefone } });
 
+  const agora = dayjs();
+
   if (!usuario) {
-    const agora = dayjs();
     await prisma.usuario.create({
       data: {
         telefone,
@@ -35,31 +41,39 @@ export async function validarPlano(telefone: string) {
         trialExpiraEm: agora.add(3, "day").toDate(),
       },
     });
-
-    // 🔄 Recarrega o usuário atualizado do banco
     usuario = await prisma.usuario.findUnique({ where: { telefone } });
   }
 
-  // ✅ Garante ao TypeScript que o usuário agora existe
-  if (!usuario) {
-    throw new Error("Falha ao criar ou encontrar usuário.");
+  // 🔒 Garante não-nulo para o TS
+  if (!usuario) throw new Error("Falha ao criar ou carregar o usuário.");
+
+  // Se faltar datas, normaliza
+  if (!usuario.trialAtivadoEm || !usuario.trialExpiraEm) {
+    await prisma.usuario.update({
+      where: { id: usuario.id },
+      data: {
+        plano: "TRIAL",
+        trialAtivadoEm: agora.toDate(),
+        trialExpiraEm: agora.add(3, "day").toDate(),
+      },
+    });
+    usuario = (await prisma.usuario.findUnique({ where: { id: usuario.id } }))!;
   }
 
-  // 🔒 Agora o TS sabe que usuario não é null
-  const agora = dayjs();
-  const isTester = usuario.tester === true;
-  const isTrial = !!usuario.trialExpiraEm && agora.isBefore(usuario.trialExpiraEm);
-  const isPremium = !!usuario.premiumExpiraEm && agora.isBefore(usuario.premiumExpiraEm);
+  const trialExpiraEm = usuario.trialExpiraEm;
+  const premiumExpiraEm = usuario.premiumExpiraEm;
 
-  // 🔄 Atualiza planos expirados automaticamente
-  if (usuario.plano === "PREMIUM" && !isPremium) {
+  const isTester  = usuario.tester === true;
+  const isTrial   = usuario.plano === "TRIAL"   && !!trialExpiraEm   && agora.isBefore(trialExpiraEm);
+  const isPremium = usuario.plano === "PREMIUM" && !!premiumExpiraEm && agora.isBefore(premiumExpiraEm);
+
+  // Expiração (só bloqueia se já passou)
+  if (usuario.plano === "PREMIUM" && premiumExpiraEm && agora.isAfter(premiumExpiraEm)) {
     await prisma.usuario.update({
       where: { id: usuario.id },
       data: { plano: "BLOQUEADO", premiumExpiraEm: null },
     });
-  }
-
-  if (usuario.plano === "TRIAL" && !isTrial) {
+  } else if (usuario.plano === "TRIAL" && trialExpiraEm && agora.isAfter(trialExpiraEm)) {
     await prisma.usuario.update({
       where: { id: usuario.id },
       data: { plano: "BLOQUEADO", trialExpiraEm: null },
