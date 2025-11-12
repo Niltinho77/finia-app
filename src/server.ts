@@ -1,21 +1,21 @@
 import express from "express";
 import cors from "cors";
-import bodyParser from "body-parser";
 import dotenv from "dotenv";
 import { stripeWebhookHandler } from "./routes/stripeWebhook.js";
 import stripeRoutes from "./routes/stripe.js";
-import stripeSessionRoutes from "./routes/stripeSession.js"; // ✅ novo
+import stripeSessionRoutes from "./routes/stripeSession.js";
 import whatsappRoutes from "./routes/whatsapp.js";
 import iaRoutes from "./routes/ia.js";
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
+// ✅ 1. CORS sempre antes de tudo
 app.use(cors());
 
-// ✅ 1. Rota do webhook isolada (usa raw)
+// ✅ 2. Rota exclusiva do Stripe (usa raw body)
 app.post(
   "/api/stripe/webhook",
   express.raw({ type: "application/json" }),
@@ -26,11 +26,11 @@ app.post(
   stripeWebhookHandler
 );
 
-// ✅ 2. Agora sim, os parsers normais para as outras rotas
+// ✅ 3. Parser JSON vem *depois* (não afeta o webhook)
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ 3. Suas rotas normais (essas precisam do body JSON)
+// ✅ 4. Suas rotas normais
 app.use("/api/stripe", stripeSessionRoutes);
 app.use("/api/stripe", stripeRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
@@ -38,4 +38,7 @@ app.use("/api/ia", iaRoutes);
 
 app.get("/", (_req, res) => res.send("FinIA backend rodando 🚀"));
 
-app.listen(PORT, () => console.log(`Servidor FinIA rodando na porta ${PORT}`));
+// ✅ 5. Subir o servidor
+app.listen(PORT, "0.0.0.0", () =>
+  console.log(`✅ FinIA rodando em http://0.0.0.0:${PORT}`)
+);
