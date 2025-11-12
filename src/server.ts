@@ -12,10 +12,15 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-// ✅ 1. CORS sempre antes de tudo
 app.use(cors());
 
-// ✅ 2. Rota exclusiva do Stripe (usa raw body)
+// ✅ 1. Middleware de log pra debug temporário
+app.use((req, _res, next) => {
+  console.log(`➡️ ${req.method} ${req.url}`);
+  next();
+});
+
+// ✅ 2. Isolar o webhook — usa express.raw() SOMENTE nele
 app.post(
   "/api/stripe/webhook",
   express.raw({ type: "application/json" }),
@@ -26,7 +31,7 @@ app.post(
   stripeWebhookHandler
 );
 
-// ✅ 3. Parser JSON vem *depois* (não afeta o webhook)
+// ✅ 3. As demais rotas usam JSON normalmente
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -38,7 +43,6 @@ app.use("/api/ia", iaRoutes);
 
 app.get("/", (_req, res) => res.send("FinIA backend rodando 🚀"));
 
-// ✅ 5. Subir o servidor
-app.listen(PORT, "0.0.0.0", () =>
-  console.log(`✅ FinIA rodando em http://0.0.0.0:${PORT}`)
-);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`✅ FinIA rodando em http://0.0.0.0:${PORT}`);
+});
