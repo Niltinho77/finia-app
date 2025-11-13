@@ -1,7 +1,7 @@
 // src/routes/transacoes.ts
 import { Router } from "express";
 import  prisma  from "../db/client.js";
-import { authMiddleware } from "../middlewares/auth";
+import { authMiddleware } from "../middlewares/auth.js";
 
 const router = Router();
 
