@@ -6,9 +6,9 @@ import stripeRoutes from "./routes/stripe.js";
 import stripeSessionRoutes from "./routes/stripeSession.js";
 import whatsappRoutes from "./routes/whatsapp.js";
 import iaRoutes from "./routes/ia.js";
-import authRouter from "./routes/auth";
-import transactionsRouter from "./routes/transacoes";
-import tasksRouter from "./routes/tarefas";
+import authRouter from "./routes/auth.js";
+import transactionsRouter from "./routes/transacoes.js";
+import tasksRouter from "./routes/tarefas.js";
 
 dotenv.config();
 
