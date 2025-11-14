@@ -833,84 +833,190 @@ ${tipoEmoji} *Tipo:* ${
       }
 
       if (tipo === "tarefa" && acao === "inserir") {
-      const agora = dayjs(); // já com America/Sao_Paulo
+  const agora = dayjs(); // já com America/Sao_Paulo
 
-      // 🧭 usa data/hora da IA, se vierem preenchidas
-      let dataTarefa: dayjs.Dayjs | null = null;
-      let horaFinal: string | null = null;
+  // 🧭 usa data/hora da IA, se vierem preenchidas
+  let dataTarefa: dayjs.Dayjs | null = null;
+  let horaFinal: string | null = null;
 
-      if (data && dayjs(data).isValid()) {
-        dataTarefa = dayjs(data);
-        console.log("🧭 Data recebida da IA:", data, "→ após correção:", dataTarefa.format("DD/MM/YYYY"));
+  if (data && dayjs(data).isValid()) {
+    dataTarefa = dayjs(data);
+    console.log(
+      "🧭 Data recebida da IA:",
+      data,
+      "→ após correção:",
+      dataTarefa.format("DD/MM/YYYY")
+    );
+  } else {
+    // tenta extrair localmente, se a IA não tiver mandado
+    const { data: dataExtraida, hora: horaExtraida } =
+      extrairDataEHora(descricao);
+    console.log("🧭 Debug Chrono:", descricao, "=>", dataExtraida, horaExtraida);
 
-      } else {
-        // tenta extrair localmente, se a IA não tiver mandado
-        const { data: dataExtraida, hora: horaExtraida } = extrairDataEHora(descricao);
-        console.log("🧭 Debug Chrono:", descricao, "=>", dataExtraida, horaExtraida);
+    if (dataExtraida) dataTarefa = dayjs(dataExtraida);
+    horaFinal = horaExtraida ?? null;
 
-        if (dataExtraida) dataTarefa = dayjs(dataExtraida);
-        horaFinal = horaExtraida ?? null;
-      }
+    // 🔢 1) Se ainda não tiver data, tenta formatos numéricos: 18/12, 18-12-25, 18/12/2025
+    if (!dataTarefa) {
+      const matchNum = descricao.match(
+        /\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/
+      );
+      if (matchNum) {
+        const dia = parseInt(matchNum[1], 10);
+        const mes = parseInt(matchNum[2], 10);
+        const anoAtual = agora.year();
 
-      // se mesmo assim não encontrou data, usa hoje
-      // 🧭 fallback inteligente baseado em palavras (com normalização de acentos)
-      if (!dataTarefa) {
-        const texto = textoBruto
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase();
-
-
-        if (texto.includes("depois de amanha")) {
-          dataTarefa = agora.add(2, "day");
-          console.log("🧭 Fallback detectou 'depois de amanhã' →", dataTarefa.format("DD/MM/YYYY"));
-        } else if (texto.includes("amanha")) {
-          dataTarefa = agora.add(1, "day");
-          console.log("🧭 Fallback detectou 'amanhã' →", dataTarefa.format("DD/MM/YYYY"));
-        } else if (texto.includes("hoje")) {
-          dataTarefa = agora.startOf("day");
-          console.log("🧭 Fallback detectou 'hoje' →", dataTarefa.format("DD/MM/YYYY"));
+        let ano: number;
+        if (matchNum[3]) {
+          const y = matchNum[3];
+          ano =
+            y.length === 2
+              ? 2000 + parseInt(y, 10) // "25" -> 2025
+              : parseInt(y, 10); // "2025"
         } else {
-          dataTarefa = agora;
-          console.log("🧭 Fallback padrão: hoje →", dataTarefa.format("DD/MM/YYYY"));
+          ano = anoAtual; // 18/12 -> 18/12 do ano corrente
+        }
+
+        const parsed = dayjs(`${ano}-${mes}-${dia}`, "YYYY-M-D", true);
+        if (parsed.isValid()) {
+          dataTarefa = parsed;
+          console.log(
+            "🧭 Data detectada via formato numérico:",
+            matchNum[0],
+            "→",
+            dataTarefa.format("DD/MM/YYYY")
+          );
         }
       }
-
-
-      // se ainda não tem hora, usa a que veio do JSON
-      if (!horaFinal && hora && /^\d{1,2}:\d{2}$/.test(hora)) horaFinal = hora;
-
-      // ✅ Corrige apenas se a data for *antes* de hoje (não o mesmo dia)
-      const hoje = agora.tz("America/Sao_Paulo").startOf("day");
-      const dataLocal = dataTarefa.tz("America/Sao_Paulo").startOf("day");
-
-      if (dataLocal.isBefore(hoje)) {
-        console.log("⚙️ Corrigindo data antiga da IA:", dataTarefa.format("DD/MM/YYYY"), "→", hoje.format("DD/MM/YYYY"));
-        dataTarefa = hoje; // usa o dia atual, não amanhã
-      }
-
-
-
-      // cria tarefa
-      await prisma.tarefa.create({
-        data: {
-          usuarioId: usuario.id,
-          descricao,
-          data: dataTarefa.toDate(),
-          hora: horaFinal,
-          status: "PENDENTE",
-          origemTexto: descricao,
-        },
-      });
-
-      // formata resposta amigável
-      let dataFmt = dataTarefa.format("dddd, DD/MM");
-      if (horaFinal) dataFmt += ` às ${horaFinal}`;
-
-      return `📝 *Tarefa adicionada com sucesso!*
-    📌 ${descricao}
-    🕒 ${dataFmt}`;
     }
+
+    // 🔤 2) Se ainda não tiver data, tenta "18 de dezembro" / "18 dezembro"
+    if (!dataTarefa) {
+      const textoNormalizado = descricao
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+
+      const matchExtenso = textoNormalizado.match(
+        /\b(\d{1,2})\s*(de\s+)?(janeiro|fevereiro|marco|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/
+      );
+
+      if (matchExtenso) {
+        const dia = parseInt(matchExtenso[1], 10);
+        let mesNome = matchExtenso[3]; // já sem acento
+
+        // mapa de mês → índice (0–11)
+        const mesesMap: Record<string, number> = {
+          janeiro: 0,
+          fevereiro: 1,
+          marco: 2,
+          abril: 3,
+          maio: 4,
+          junho: 5,
+          julho: 6,
+          agosto: 7,
+          setembro: 8,
+          outubro: 9,
+          novembro: 10,
+          dezembro: 11,
+        };
+
+        // só por segurança com "março" que virou "marco"
+        mesNome = mesNome.replace("ç", "c");
+
+        const mesIndex = mesesMap[mesNome];
+        if (mesIndex != null) {
+          const ano = agora.year();
+          const parsed = dayjs()
+            .year(ano)
+            .month(mesIndex)
+            .date(dia);
+
+          if (parsed.isValid()) {
+            dataTarefa = parsed;
+            console.log(
+              "🧭 Data detectada via formato extenso:",
+              matchExtenso[0],
+              "→",
+              dataTarefa.format("DD/MM/YYYY")
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // 🧭 fallback inteligente baseado em palavras (amanhã, depois de amanhã, hoje...)
+  if (!dataTarefa) {
+    const texto = textoBruto
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+    if (texto.includes("depois de amanha")) {
+      dataTarefa = agora.add(2, "day");
+      console.log(
+        "🧭 Fallback detectou 'depois de amanhã' →",
+        dataTarefa.format("DD/MM/YYYY")
+      );
+    } else if (texto.includes("amanha")) {
+      dataTarefa = agora.add(1, "day");
+      console.log(
+        "🧭 Fallback detectou 'amanhã' →",
+        dataTarefa.format("DD/MM/YYYY")
+      );
+    } else if (texto.includes("hoje")) {
+      dataTarefa = agora.startOf("day");
+      console.log(
+        "🧭 Fallback detectou 'hoje' →",
+        dataTarefa.format("DD/MM/YYYY")
+      );
+    } else {
+      dataTarefa = agora;
+      console.log(
+        "🧭 Fallback padrão: hoje →",
+        dataTarefa.format("DD/MM/YYYY")
+      );
+    }
+  }
+
+  // se ainda não tem hora, usa a que veio do JSON
+  if (!horaFinal && hora && /^\d{1,2}:\d{2}$/.test(hora)) horaFinal = hora;
+
+  // ✅ Corrige apenas se a data for *antes* de hoje (não o mesmo dia)
+  const hoje = agora.tz("America/Sao_Paulo").startOf("day");
+  const dataLocal = dataTarefa.tz("America/Sao_Paulo").startOf("day");
+
+  if (dataLocal.isBefore(hoje)) {
+    console.log(
+      "⚙️ Corrigindo data antiga da IA:",
+      dataTarefa.format("DD/MM/YYYY"),
+      "→",
+      hoje.format("DD/MM/YYYY")
+    );
+    dataTarefa = hoje; // usa o dia atual, não amanhã
+  }
+
+  // cria tarefa
+  await prisma.tarefa.create({
+    data: {
+      usuarioId: usuario.id,
+      descricao,
+      data: dataTarefa.toDate(),
+      hora: horaFinal,
+      status: "PENDENTE",
+      origemTexto: descricao,
+    },
+  });
+
+  // formata resposta amigável
+  let dataFmt = dataTarefa.format("dddd, DD/MM");
+  if (horaFinal) dataFmt += ` às ${horaFinal}`;
+
+  return `📝 *Tarefa adicionada com sucesso!*
+📌 ${descricao}
+🕒 ${dataFmt}`;
+}
 
         }
   
