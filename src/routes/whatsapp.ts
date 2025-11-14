@@ -102,7 +102,6 @@ whatsappRouter.post("/webhook", async (req: Request, res: Response) => {
           }
 }
 
-
           // 👤 Garante que o usuário exista
           const usuario = await prisma.usuario.upsert({
             where: { telefone: numero },

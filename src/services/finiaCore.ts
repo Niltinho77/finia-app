@@ -1,5 +1,6 @@
 // src/services/finiaCore.ts
 import { PrismaClient, Usuario } from "@prisma/client";
+import { randomBytes } from "crypto";
 import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat.js";
 import localizedFormat from "dayjs/plugin/localizedFormat.js";
@@ -81,6 +82,57 @@ export async function validarPlano(telefone: string): Promise<{
   }
 
   return { autorizado: isTester || isTrial || isPremium, usuario };
+}
+
+/**
+ * Gera (ou reutiliza) um link mágico seguro para o dashboard.
+ *
+ * - Usa o model DashboardMagicLink do Prisma:
+ *   id, token, usuarioId, usado, expiraEm, criadoEm
+ * - Reutiliza um link ainda válido (usado = false e expiraEm > agora)
+ * - Monta a URL com base em DASHBOARD_URL ou FRONTEND_URL
+ */
+async function gerarDashboardMagicLink(usuario: Usuario): Promise<string> {
+  const agora = dayjs();
+
+  // 🧱 Base da URL do dashboard
+  const baseUrl =
+    process.env.DASHBOARD_URL ||
+    process.env.FRONTEND_URL ||
+    "http://localhost:3000";
+
+  // remove barra no final, se tiver
+  const base = baseUrl.replace(/\/+$/, "");
+
+  // 🔁 Tenta reutilizar um link ainda válido
+  const existente = await prisma.dashboardMagicLink.findFirst({
+    where: {
+      usuarioId: usuario.id,
+      usado: false,
+      expiraEm: { gt: agora.toDate() },
+    },
+    orderBy: { criadoEm: "desc" }, // <= bate com teu schema
+  });
+
+  if (existente) {
+    return `${base}/login?token=${encodeURIComponent(existente.token)}`;
+  }
+
+  // 🔐 Gera token aleatório e expira em 30 minutos
+  const token = randomBytes(32).toString("hex");
+  const expiraEm = agora.add(30, "minute").toDate();
+
+  const registro = await prisma.dashboardMagicLink.create({
+    data: {
+      usuarioId: usuario.id,
+      token,
+      expiraEm,
+      // "usado" não precisa passar, já tem @default(false)
+    },
+  });
+
+  // 🔗 Monta a URL final do link mágico
+  return `${base}/login?token=${encodeURIComponent(registro.token)}`;
 }
 
 
@@ -186,15 +238,14 @@ function inferirTipoPorPalavras(texto: string): "ENTRADA" | "SAIDA" | null {
 
 
 async function resumoTransacoes(
-  usuarioId: string,
-  usuarioTelefone: string,
+  usuario: Usuario,
   periodo: Periodo,
   filtroTipo: "ENTRADA" | "SAIDA" | null
 ) {
   // 🔎 Busca transações do período
   const transacoes = await prisma.transacao.findMany({
     where: {
-      usuarioId,
+      usuarioId: usuario.id,
       data: { gte: periodo.inicio, lte: periodo.fim },
       valor: { gt: 0 },
     },
@@ -222,7 +273,7 @@ async function resumoTransacoes(
 
   // 🔹 Totais gerais (saldo acumulado)
   const todasTransacoes = await prisma.transacao.findMany({
-    where: { usuarioId },
+    where: { usuarioId: usuario.id },
   });
 
   const totalGeralEntradas = todasTransacoes
@@ -240,57 +291,75 @@ async function resumoTransacoes(
   ).format("DD/MM")}`;
 
   // 🔹 Gera gráfico de gastos reais (SAÍDAS) no período selecionado
-try {
-  const gastos = transacoes.filter(
-    (t) => t.tipo?.toUpperCase?.() === "SAIDA" || t.tipo?.toLowerCase?.() === "saida"
-  );
+  try {
+    const gastos = transacoes.filter(
+      (t) =>
+        t.tipo?.toUpperCase?.() === "SAIDA" ||
+        t.tipo?.toLowerCase?.() === "saida"
+    );
 
-  if (gastos.length === 0) {
-    console.log("⚠️ Nenhum gasto detectado para o gráfico no período:", periodo.label);
-  } else {
-    const porCategoria = new Map<string, number>();
-
-    for (const t of gastos) {
-      const nomeCategoria = t.categoria?.nome?.trim() || "Outros";
-      porCategoria.set(nomeCategoria, (porCategoria.get(nomeCategoria) || 0) + t.valor);
-    }
-
-    const topCategorias = [...porCategoria.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8); // mostra até 8 categorias
-
-    const categorias = topCategorias.map(([nome]) => nome);
-    const valores = topCategorias.map(([, v]) => v);
-
-    // sempre gera, mesmo com uma categoria
-    if (categorias.length > 0) {
-      const chartPath = await gerarGraficoPizza(categorias, valores);
-      await sendImageFile(
-        usuarioTelefone,
-        chartPath,
-        `📊 Seus gastos ${periodo.label} por categoria`
+    if (gastos.length === 0) {
+      console.log(
+        "⚠️ Nenhum gasto detectado para o gráfico no período:",
+        periodo.label
       );
-      console.log("✅ Gráfico de gastos enviado com sucesso!");
     } else {
-      console.log("⚠️ Nenhuma categoria de gasto para plotar.");
-    }
-  }
-} catch (err: any) {
-  console.error("⚠️ Falha ao gerar/enviar gráfico:", err?.message || err);
-}
+      const porCategoria = new Map<string, number>();
 
+      for (const t of gastos) {
+        const nomeCategoria = t.categoria?.nome?.trim() || "Outros";
+        porCategoria.set(
+          nomeCategoria,
+          (porCategoria.get(nomeCategoria) || 0) + t.valor
+        );
+      }
+
+      const topCategorias = [...porCategoria.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8); // mostra até 8 categorias
+
+      const categorias = topCategorias.map(([nome]) => nome);
+      const valores = topCategorias.map(([, v]) => v);
+
+      // sempre gera, mesmo com uma categoria
+      if (categorias.length > 0) {
+        const chartPath = await gerarGraficoPizza(categorias, valores);
+        await sendImageFile(
+          usuario.telefone,
+          chartPath,
+          `📊 Seus gastos ${periodo.label} por categoria`
+        );
+        console.log("✅ Gráfico de gastos enviado com sucesso!");
+      } else {
+        console.log("⚠️ Nenhuma categoria de gasto para plotar.");
+      }
+    }
+  } catch (err: any) {
+    console.error("⚠️ Falha ao gerar/enviar gráfico:", err?.message || err);
+  }
+
+  // 🔗 Gera (ou reutiliza) link mágico para o dashboard
+  let magicLinkInfo = "";
+  try {
+    const magicLink = await gerarDashboardMagicLink(usuario);
+    magicLinkInfo =
+      `\n\n🔗 *Ver detalhes no painel web:*\n` +
+      `${magicLink}`;
+  } catch (err: any) {
+    console.error("⚠️ Erro ao gerar link mágico do dashboard:", err?.message || err);
+    // se der erro, só não mostra o link – o resumo continua funcionando
+  }
 
   // 🧾 Mensagem final simplificada
-  return `📊 *Resumo financeiro ${periodo.label}*
-
-💵 *Saldo atual:* ${formatarValor(saldoAtual)}
-
-📈 *Entradas (${periodo.label}):* ${formatarValor(totalEntradas)}
-📉 *Saídas (${periodo.label}):* ${formatarValor(totalSaidas)}
-
-📅 *Período:* ${periodoFmt}`;
+  return (
+    `📊 *Resumo financeiro ${periodo.label}*\n\n` +
+    `💵 *Saldo atual:* ${formatarValor(saldoAtual)}\n\n` +
+    `📈 *Entradas (${periodo.label}):* ${formatarValor(totalEntradas)}\n` +
+    `📉 *Saídas (${periodo.label}):* ${formatarValor(totalSaidas)}\n\n` +
+    `📅 *Período:* ${periodoFmt}` +
+    magicLinkInfo
+  );
 }
-
 
 
 /** Core */
@@ -320,11 +389,31 @@ export async function processarComando(comando: any, telefone: string) {
 
   // 🔒 Regras de limitação do plano TRIAL
 
-const textoFiltrado = textoBruto
-  .normalize("NFD")
-  .replace(/[\u0300-\u036f]/g, "")
-  .toLowerCase();
+  const textoFiltrado = textoBruto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 
+  // 🔑 PEDIDO DE LINK PARA PAINEL / DASHBOARD
+  const pedePainel =
+    /\bpainel\b/.test(textoFiltrado) ||
+    /\bdashboard\b/.test(textoFiltrado) ||
+    /acesso\s+web/.test(textoFiltrado) ||
+    /acessar\s+(o\s+)?painel/.test(textoFiltrado) ||
+    /entrar\s+no\s+app/.test(textoFiltrado);
+
+  if (pedePainel) {
+    const link = await gerarDashboardMagicLink(usuario);
+
+    return (
+      "🖥️ *Acesso ao painel do FinIA*\n\n" +
+      "Use este link seguro para acessar seu dashboard pelo navegador:\n" +
+      `👉 ${link}\n\n` +
+      "⚠️ Por segurança, este link expira em *30 minutos* e é exclusivo para o seu usuário."
+    );
+  }
+
+  
 // 👋 Palavras de saudação simples
 const saudacoes = ["oi", "ola", "olá", "bom dia", "boa tarde", "boa noite", "e ai", "tudo bem", "blz", "beleza"];
 
@@ -538,11 +627,10 @@ if (usuario.plano === "TRIAL") {
 
       // 3️⃣ Executa o resumo
       return await resumoTransacoes(
-        usuario.id,
-        usuario.telefone,
+        usuario,
         periodoFinal,
         tipoInferido
-      );
+);
     }
 
 

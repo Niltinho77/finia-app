@@ -14,7 +14,6 @@ enum PlanoUsuario {
   BLOQUEADO
 }
 
-
 model Usuario {
   id              String          @id @default(cuid())
   nome            String?
@@ -31,13 +30,15 @@ model Usuario {
   // 🔹 Gerenciamento de plano
   plano           PlanoUsuario?   @default(TRIAL)
   trialAtivadoEm  DateTime?       @default(now())
-  stripeCustomerId       String?          
+  stripeCustomerId       String?
   stripeSubscriptionId   String?
   trialExpiraEm   DateTime?
   premiumExpiraEm DateTime?
   tester          Boolean         @default(false)
-}
 
+  // 🔹 Links mágicos para o dashboard
+  dashboardLinks  DashboardMagicLink[]  // <--- NOVO
+}
 
 model Categoria {
   id         String        @id @default(cuid())
@@ -62,6 +63,7 @@ model Transacao {
   confirmado   Boolean       @default(false)
   criadoEm     DateTime      @default(now())
   atualizadoEm DateTime      @updatedAt
+
   categoria    Categoria?    @relation(fields: [categoriaId], references: [id])
   usuario      Usuario       @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 }
@@ -78,6 +80,7 @@ model Tarefa {
   lembreteEnviado Boolean      @default(false)
   criadoEm        DateTime     @default(now())
   atualizadoEm    DateTime     @updatedAt
+
   usuario         Usuario      @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 }
 
@@ -90,6 +93,7 @@ model InteracaoIA {
   sucesso      Boolean         @default(true)
   messageId    String?         @unique
   criadoEm     DateTime        @default(now())
+
   usuario      Usuario         @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 }
 
@@ -112,4 +116,19 @@ enum TipoInteracaoIA {
   REMOCAO
   OUTRO
   ERRO
+}
+
+// 🔹 NOVO MODEL PARA LINK MÁGICO DO DASHBOARD
+model DashboardMagicLink {
+  id         String   @id @default(cuid())
+  token      String   @unique        // token único que vai na URL
+  usuarioId  String
+  usado      Boolean  @default(false)
+  expiraEm   DateTime
+  criadoEm   DateTime @default(now())
+
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@index([expiraEm])
 }
