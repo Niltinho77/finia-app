@@ -415,11 +415,34 @@ export async function processarComando(comando: any, telefone: string) {
 
   
 // 👋 Palavras de saudação simples
-const saudacoes = ["oi", "ola", "olá", "bom dia", "boa tarde", "boa noite", "e ai", "tudo bem", "blz", "beleza"];
+const saudacoes = [
+  "oi",
+  "ola",
+  "olá",
+  "bom dia",
+  "boa tarde",
+  "boa noite",
+  "e ai",
+  "e aí",
+  "tudo bem",
+  "blz",
+  "beleza",
+];
 
-const ehSaudacaoSimples = saudacoes.some(p => textoFiltrado === p || textoFiltrado.includes(p));
+// remove pontuações básicas e espaços extras
+const textoSaudacao = textoFiltrado
+  .replace(/[!?,.]/g, "")
+  .trim();
 
-// ✨ Se for saudação → envia mensagem de boas-vindas
+// Saudação simples = a mensagem é *apenas* a saudação (com ou sem variações mínimas)
+const ehSaudacaoSimples = saudacoes.some((p) => {
+  if (textoSaudacao === p) return true;
+  if (textoSaudacao === `${p}?`) return true;
+  if (textoSaudacao === `${p}!`) return true;
+  return false;
+});
+
+// ✨ Se for saudação *pura* → envia mensagem de boas-vindas
 if (ehSaudacaoSimples) {
   const trialFim = usuario.trialExpiraEm
     ? dayjs(usuario.trialExpiraEm).format("DD/MM")
