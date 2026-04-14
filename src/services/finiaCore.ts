@@ -866,16 +866,15 @@ ${tipoEmoji} *Tipo:* ${
         };
       }
 
-      // 🔠 NOMES DE MESES
+      // 🔠 NOMES DE MESES (texto já normalizado, sem acentos)
       else {
-        const meses = [
-          "janeiro","fevereiro","marco","março","abril","maio","junho",
-          "julho","agosto","setembro","outubro","novembro","dezembro"
-        ];
-        for (let i = 0; i < meses.length; i++) {
-          if (texto.includes(meses[i])) {
-            const ano = agora.year();
-            const d = dayjs(`${ano}-01-01`).month(i);
+        const mesesMap: Record<string, number> = {
+          janeiro: 0, fevereiro: 1, marco: 2, abril: 3, maio: 4, junho: 5,
+          julho: 6, agosto: 7, setembro: 8, outubro: 9, novembro: 10, dezembro: 11,
+        };
+        for (const [nomeMes, mesIndex] of Object.entries(mesesMap)) {
+          if (texto.includes(nomeMes)) {
+            const d = dayjs().month(mesIndex);
             p = {
               inicio: d.startOf("month").toDate(),
               fim: d.endOf("month").toDate(),
@@ -886,31 +885,31 @@ ${tipoEmoji} *Tipo:* ${
         }
       }
 
-      // 📍 Fallback — hoje / amanhã
-      if (!p) {
-        p =
-          /\bamanh/.test(texto)
-            ? {
-                inicio: agora.add(1, "day").startOf("day").toDate(),
-                fim: agora.add(1, "day").endOf("day").toDate(),
-                label: "de amanhã",
-              }
-            : {
-                inicio: agora.startOf("day").toDate(),
-                fim: agora.endOf("day").toDate(),
-                label: "de hoje",
-              };
+      // 📍 Amanhã explícito
+      if (!p && /\bamanh/.test(texto)) {
+        p = {
+          inicio: agora.add(1, "day").startOf("day").toDate(),
+          fim: agora.add(1, "day").endOf("day").toDate(),
+          label: "de amanhã",
+        };
       }
 
       console.log("🧭 Período detectado para tarefas:", p);
 
-        const tarefas = await prisma.tarefa.findMany({
-          where: { usuarioId: usuario.id, status: "PENDENTE", data: { gte: p.inicio, lte: p.fim } },
-          orderBy: { data: "asc" },
-          take: 50,
-        });
+      // Quando nenhum período foi especificado, busca todas as pendentes a partir de hoje
+      const semPeriodo = !p;
 
-        if (tarefas.length === 0) return `📭 Nenhuma tarefa ${p.label}.`;
+      const tarefas = await prisma.tarefa.findMany({
+        where: semPeriodo
+          ? { usuarioId: usuario.id, status: "PENDENTE", OR: [{ data: { gte: agora.startOf("day").toDate() } }, { data: null }] }
+          : { usuarioId: usuario.id, status: "PENDENTE", data: { gte: p!.inicio, lte: p!.fim } },
+        orderBy: { data: "asc" },
+        take: 50,
+      });
+
+      const labelPeriodo = p?.label ?? "pendentes";
+
+        if (tarefas.length === 0) return `📭 Nenhuma tarefa ${labelPeriodo}.`;
 
         // Agrupa por dia
         const grupos = tarefas.reduce<Record<string, any[]>>((acc, t) => {
@@ -921,7 +920,8 @@ ${tipoEmoji} *Tipo:* ${
         }, {});
 
         // Monta as seções por dia
-        let mensagem = "📅 *Suas próximas tarefas:*\n\n";
+        const tituloLista = semPeriodo ? "📅 *Suas tarefas pendentes:*\n\n" : `📅 *Tarefas ${labelPeriodo}:*\n\n`;
+        let mensagem = tituloLista;
 
         const diasOrdenados = Object.keys(grupos).sort();
 
