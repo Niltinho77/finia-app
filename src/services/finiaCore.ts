@@ -374,9 +374,13 @@ async function montarRespostaSaudacao(usuario: Usuario): Promise<string> {
   const totalSaidas   = saldos.find((s) => s.tipo === "SAIDA")?._sum.valor ?? 0;
   const saldo = totalEntradas - totalSaidas;
 
-  // Tarefas pendentes
+  // Tarefas pendentes a partir de hoje (mesmo filtro da listagem)
   const tarefasPendentes = await prisma.tarefa.count({
-    where: { usuarioId: usuario.id, status: "PENDENTE" },
+    where: {
+      usuarioId: usuario.id,
+      status: "PENDENTE",
+      AND: [{ OR: [{ data: { gte: agora.startOf("day").toDate() } }, { data: null }] }],
+    },
   });
 
   // Última transação registrada
@@ -901,7 +905,11 @@ ${tipoEmoji} *Tipo:* ${
 
       const tarefas = await prisma.tarefa.findMany({
         where: semPeriodo
-          ? { usuarioId: usuario.id, status: "PENDENTE", OR: [{ data: { gte: agora.startOf("day").toDate() } }, { data: null }] }
+          ? {
+              usuarioId: usuario.id,
+              status: "PENDENTE",
+              AND: [{ OR: [{ data: { gte: agora.startOf("day").toDate() } }, { data: null }] }],
+            }
           : { usuarioId: usuario.id, status: "PENDENTE", data: { gte: p!.inicio, lte: p!.fim } },
         orderBy: { data: "asc" },
         take: 50,
@@ -946,205 +954,108 @@ ${tipoEmoji} *Tipo:* ${
       }
 
         if (tipo === "tarefa" && acao === "inserir") {
-        const agora = dayjs(); // já com America/Sao_Paulo
-
-        // 🧭 usa o TEXTO ORIGINAL pra entender datas, não só a descrição "limpa" da IA
+        const agora = dayjs().tz("America/Sao_Paulo");
         const textoParaDatas = (textoBruto || descricao || "").toString();
+        const textoNorm = textoParaDatas
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase();
+
         let dataTarefa: dayjs.Dayjs | null = null;
         let horaFinal: string | null = null;
 
-        // 🕒 1) HORA: prioridade pra hora que veio da IA; se não tiver, tenta pegar do texto
+        // ── HORA ──────────────────────────────────────────────────────────────
+        // 1) Prioridade: hora vinda da IA (já no formato HH:mm)
         if (hora && /^\d{1,2}:\d{2}$/.test(hora)) {
           horaFinal = hora;
         } else {
-          const matchHora = textoParaDatas
-            .toLowerCase()
-            .match(/(\d{1,2})(?:(?:h|:)(\d{0,2}))?/);
-          if (matchHora) {
-            const hh = matchHora[1].padStart(2, "0");
-            const mm = matchHora[2] ? matchHora[2].padEnd(2, "0") : "00";
+          // 2) Regex específica de hora: "15h30", "15:30", "15h", "às 15"
+          const mH = textoParaDatas.match(
+            /\b(\d{1,2})[h:](\d{2})\b|\b(\d{1,2})h\b|\bas?\s+(\d{1,2})\b/i
+          );
+          if (mH) {
+            const hh = (mH[1] ?? mH[3] ?? mH[4]!).padStart(2, "0");
+            const mm = (mH[2] ?? "00").padEnd(2, "0");
             horaFinal = `${hh}:${mm}`;
           }
         }
 
-        // 🗓️ 2) PRIMEIRO tenta datas explícitas digitadas pelo usuário
-        //     Exemplos: 18/11, 18-11-25, 18/11/2025
-        const matchNum = textoParaDatas.match(
-          /\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/
-        );
-        if (matchNum) {
-          const dia = parseInt(matchNum[1], 10);
-          const mes = parseInt(matchNum[2], 10);
-          const anoAtual = agora.year();
-
-          let ano: number;
-          if (matchNum[3]) {
-            const y = matchNum[3];
-            ano = y.length === 2 ? 2000 + parseInt(y, 10) : parseInt(y, 10);
-          } else {
-            ano = anoAtual; // 18/11 -> ano corrente
-          }
-
-          let parsed = dayjs(`${ano}-${mes}-${dia}`, "YYYY-M-D", true);
-
-          // Se o usuário não colocou ano e a data já passou, joga para o ano que vem
-          if (!matchNum[3] && parsed.isBefore(agora, "day")) {
-            parsed = parsed.add(1, "year");
-          }
-
-          if (parsed.isValid()) {
-            dataTarefa = parsed;
-            console.log(
-              "🧭 Data detectada via formato numérico (texto original):",
-              matchNum[0],
-              "→",
-              dataTarefa.format("DD/MM/YYYY")
-            );
-          }
+        // ── DATA ──────────────────────────────────────────────────────────────
+        // 1) Expressões relativas (maior prioridade — mais comuns no dia a dia)
+        if (textoNorm.includes("depois de amanha")) {
+          dataTarefa = agora.add(2, "day");
+        } else if (textoNorm.includes("amanha")) {
+          dataTarefa = agora.add(1, "day");
+        } else if (textoNorm.includes("hoje")) {
+          dataTarefa = agora.startOf("day");
         }
 
-        // 🗓️ 3) Se ainda não tiver data, tenta formato por extenso: "18 de novembro", "18 novembro"
+        // 2) Dias da semana: "segunda", "terça", "quarta"... (próxima ocorrência)
         if (!dataTarefa) {
-          const textoNormalizado = textoParaDatas
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .toLowerCase();
-
-          const matchExtenso = textoNormalizado.match(
-            /\b(\d{1,2})\s*(de\s+)?(janeiro|fevereiro|marco|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/
-          );
-
-          if (matchExtenso) {
-            const dia = parseInt(matchExtenso[1], 10);
-            let mesNome = matchExtenso[3];
-
-            const mesesMap: Record<string, number> = {
-              janeiro: 0,
-              fevereiro: 1,
-              marco: 2,
-              março: 2,
-              abril: 3,
-              maio: 4,
-              junho: 5,
-              julho: 6,
-              agosto: 7,
-              setembro: 8,
-              outubro: 9,
-              novembro: 10,
-              dezembro: 11,
-            };
-
-            mesNome = mesNome.replace("ç", "c");
-
-            const mesIndex = mesesMap[mesNome];
-            if (mesIndex != null) {
-              let parsed = dayjs()
-                .year(agora.year())
-                .month(mesIndex)
-                .date(dia);
-
-              // se "18 de novembro" já passou este ano, joga para o ano que vem
-              if (parsed.isBefore(agora, "day")) {
-                parsed = parsed.add(1, "year");
-              }
-
-              if (parsed.isValid()) {
-                dataTarefa = parsed;
-                console.log(
-                  "🧭 Data detectada via formato extenso (texto original):",
-                  matchExtenso[0],
-                  "→",
-                  dataTarefa.format("DD/MM/YYYY")
-                );
-              }
+          const diasSemana: Record<string, number> = {
+            segunda: 1, terca: 2, quarta: 3, quinta: 4,
+            sexta: 5, sabado: 6, domingo: 7,
+          };
+          for (const [nome, isoNum] of Object.entries(diasSemana)) {
+            if (textoNorm.includes(nome)) {
+              const diaHoje = agora.isoWeekday();
+              let diff = isoNum - diaHoje;
+              if (diff <= 0) diff += 7;
+              dataTarefa = agora.add(diff, "day");
+              break;
             }
           }
         }
 
-        // 🧠 4) Se ainda não tiver data explícita, aí sim confia no que a IA mandou em `data`
-        if (!dataTarefa && data && dayjs(data).isValid()) {
-          dataTarefa = dayjs(data);
-          console.log(
-            "🧭 Data recebida da IA (sem data explícita encontrada):",
-            data,
-            "→",
-            dataTarefa.format("DD/MM/YYYY")
-          );
-        }
-
-        // 🧭 5) Se mesmo assim não tiver, tenta extrair com o nosso util (chrono + -1 dia)
+        // 3) Data numérica: "18/04", "18-04", "18/04/2025", "18-04-25"
         if (!dataTarefa) {
-          const { data: dataExtraida, hora: horaExtraida } =
-            extrairDataEHora(textoParaDatas);
-          console.log(
-            "🧭 Debug Chrono (tarefa inserir):",
-            textoParaDatas,
-            "=>",
-            dataExtraida,
-            horaExtraida
-          );
-
-          if (dataExtraida) dataTarefa = dayjs(dataExtraida);
-          if (!horaFinal && horaExtraida) horaFinal = horaExtraida ?? null;
-        }
-
-        // 🧭 6) Fallback inteligente baseado em palavras (amanhã, depois de amanhã, hoje...)
-        if (!dataTarefa) {
-          const textoNorm = textoParaDatas
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .toLowerCase();
-
-          if (textoNorm.includes("depois de amanha")) {
-            dataTarefa = agora.add(2, "day");
-            console.log(
-              "🧭 Fallback detectou 'depois de amanhã' →",
-              dataTarefa.format("DD/MM/YYYY")
-            );
-          } else if (textoNorm.includes("amanha")) {
-            dataTarefa = agora.add(1, "day");
-            console.log(
-              "🧭 Fallback detectou 'amanhã' →",
-              dataTarefa.format("DD/MM/YYYY")
-            );
-          } else if (textoNorm.includes("hoje")) {
-            dataTarefa = agora.startOf("day");
-            console.log(
-              "🧭 Fallback detectou 'hoje' →",
-              dataTarefa.format("DD/MM/YYYY")
-            );
-          } else {
-            dataTarefa = agora;
-            console.log(
-              "🧭 Fallback padrão: hoje →",
-              dataTarefa.format("DD/MM/YYYY")
-            );
+          const mN = textoParaDatas.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
+          if (mN) {
+            const dia = parseInt(mN[1], 10);
+            const mes = parseInt(mN[2], 10);
+            let ano = agora.year();
+            if (mN[3]) ano = mN[3].length === 2 ? 2000 + parseInt(mN[3], 10) : parseInt(mN[3], 10);
+            let parsed = dayjs(`${ano}-${mes}-${dia}`, "YYYY-M-D", true);
+            if (!mN[3] && parsed.isBefore(agora, "day")) parsed = parsed.add(1, "year");
+            if (parsed.isValid()) dataTarefa = parsed;
           }
         }
 
-        // 🛑 7) Correção de datas muito antigas da IA (só se ainda assim caiu no passado)
-        const hoje = agora.tz("America/Sao_Paulo").startOf("day");
-        const dataLocal = dataTarefa.tz("America/Sao_Paulo").startOf("day");
-
-        // não corrige caso o usuário claramente fale de passado (ontem, semana passada, mês passado)
-        const textoNormFinal = textoParaDatas
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase();
-        const falaPassado =
-          textoNormFinal.includes("ontem") ||
-          textoNormFinal.includes("semana passada") ||
-          textoNormFinal.includes("mes passado");
-
-        if (!falaPassado && dataLocal.isBefore(hoje)) {
-          console.log(
-            "⚙️ Corrigindo data antiga (provavelmente erro da IA):",
-            dataTarefa.format("DD/MM/YYYY"),
-            "→",
-            hoje.format("DD/MM/YYYY")
+        // 4) Data por extenso: "18 de abril", "18 abril"
+        if (!dataTarefa) {
+          const mesesMap: Record<string, number> = {
+            janeiro: 0, fevereiro: 1, marco: 2, abril: 3, maio: 4, junho: 5,
+            julho: 6, agosto: 7, setembro: 8, outubro: 9, novembro: 10, dezembro: 11,
+          };
+          const mE = textoNorm.match(
+            /\b(\d{1,2})\s*(?:de\s+)?(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/
           );
-          dataTarefa = hoje;
+          if (mE) {
+            const mesIndex = mesesMap[mE[2]];
+            let parsed = dayjs().month(mesIndex).date(parseInt(mE[1], 10));
+            if (parsed.isBefore(agora, "day")) parsed = parsed.add(1, "year");
+            if (parsed.isValid()) dataTarefa = parsed;
+          }
         }
+
+        // 5) Fallback: data que a IA enviou
+        if (!dataTarefa && data && dayjs(data).isValid()) {
+          dataTarefa = dayjs(data).tz("America/Sao_Paulo");
+        }
+
+        // 6) Último recurso: hoje
+        if (!dataTarefa) {
+          dataTarefa = agora.startOf("day");
+        }
+
+        // Garante que datas passadas (erro da IA) virem para hoje,
+        // exceto se o usuário explicitamente falou de passado
+        const falaPassado = textoNorm.includes("ontem") || textoNorm.includes("semana passada");
+        if (!falaPassado && dataTarefa.startOf("day").isBefore(agora.startOf("day"))) {
+          dataTarefa = agora.startOf("day");
+        }
+
+        console.log("🗓️ Tarefa — data final:", dataTarefa.format("DD/MM/YYYY"), "hora:", horaFinal);
 
         // cria tarefa
         await prisma.tarefa.create({
