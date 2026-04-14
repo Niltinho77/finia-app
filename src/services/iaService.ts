@@ -46,7 +46,8 @@ REGRAS PARA TRANSAÇÕES:
   - "hoje", "diário", "do dia" → periodo="hoje"
   - "ontem" → periodo="ontem"
   - "semana", "desta semana", "semana passada" → periodo="semana"
-  - "mês", "deste mês", "mês passado" → periodo="mes"
+  - "mês", "deste mês", "mês passado", "mensal", "mensais" → periodo="mes"
+  - Consultas genéricas SEM período explícito ("meus gastos", "histórico", "extrato", "quanto gastei", "minhas despesas") → periodo="mes"
 - Se houver data explícita ("18/12", "18 de dezembro"), preencha "data" em vez de "periodo"
 
 REGRAS PARA TAREFAS:

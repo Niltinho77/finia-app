@@ -729,10 +729,11 @@ if (usuario.plano === "TRIAL") {
             label: "deste mês",
           };
         } else {
+          // Fallback: sem período especificado → mês atual (comportamento mais natural)
           periodoFinal = {
-            inicio: agora.startOf("day").toDate(),
-            fim: agora.endOf("day").toDate(),
-            label: "de hoje",
+            inicio: agora.startOf("month").toDate(),
+            fim: agora.endOf("month").toDate(),
+            label: "deste mês",
           };
         }
       }
