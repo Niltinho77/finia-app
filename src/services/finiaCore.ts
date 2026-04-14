@@ -1,6 +1,7 @@
 // src/services/finiaCore.ts
 import { PrismaClient, Usuario } from "@prisma/client";
 import { randomBytes } from "crypto";
+import fs from "fs";
 import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat.js";
 import localizedFormat from "dayjs/plugin/localizedFormat.js";
@@ -195,16 +196,15 @@ function detectarPeriodo(texto: string): Periodo | null {
 
 
 
-  // 🔹 Nomes de meses (com correção de -1 mês)
-  const meses = [
-    "janeiro","fevereiro","março","marco","abril","maio","junho",
-    "julho","agosto","setembro","outubro","novembro","dezembro",
-  ];
+  // 🔹 Nomes de meses — texto já normalizado (sem acentos) pela linha 148
+  const mesesMap: Record<string, number> = {
+    janeiro: 0, fevereiro: 1, marco: 2, abril: 3, maio: 4, junho: 5,
+    julho: 6, agosto: 7, setembro: 8, outubro: 9, novembro: 10, dezembro: 11,
+  };
 
-  for (let i = 0; i < meses.length; i++) {
-    if (t.includes(meses[i])) {
-      const ano = dayjs().year();
-      const d = dayjs(`${ano}-01-01`).month(i).subtract(1, "month");
+  for (const [nomeMes, mesIndex] of Object.entries(mesesMap)) {
+    if (t.includes(nomeMes)) {
+      const d = dayjs().month(mesIndex);
       return {
         inicio: d.startOf("month").toDate(),
         fim: d.endOf("month").toDate(),
@@ -271,19 +271,15 @@ async function resumoTransacoes(
     .filter((t) => t.tipo === "SAIDA")
     .reduce((s, t) => s + t.valor, 0);
 
-  // 🔹 Totais gerais (saldo acumulado)
-  const todasTransacoes = await prisma.transacao.findMany({
+  // 🔹 Saldo acumulado via aggregate (sem carregar todas as transações na memória)
+  const saldos = await prisma.transacao.groupBy({
+    by: ["tipo"],
     where: { usuarioId: usuario.id },
+    _sum: { valor: true },
   });
 
-  const totalGeralEntradas = todasTransacoes
-    .filter((t) => t.tipo === "ENTRADA")
-    .reduce((s, t) => s + t.valor, 0);
-
-  const totalGeralSaidas = todasTransacoes
-    .filter((t) => t.tipo === "SAIDA")
-    .reduce((s, t) => s + t.valor, 0);
-
+  const totalGeralEntradas = saldos.find((s) => s.tipo === "ENTRADA")?._sum.valor ?? 0;
+  const totalGeralSaidas   = saldos.find((s) => s.tipo === "SAIDA")?._sum.valor ?? 0;
   const saldoAtual = totalGeralEntradas - totalGeralSaidas;
 
   const periodoFmt = `${dayjs(periodo.inicio).format("DD/MM")} — ${dayjs(
@@ -329,6 +325,7 @@ async function resumoTransacoes(
           chartPath,
           `📊 Seus gastos ${periodo.label} por categoria`
         );
+        try { fs.unlinkSync(chartPath); } catch {}
         console.log("✅ Gráfico de gastos enviado com sucesso!");
       } else {
         console.log("⚠️ Nenhuma categoria de gasto para plotar.");
@@ -362,6 +359,114 @@ async function resumoTransacoes(
 }
 
 
+/** Monta resposta de saudação contextual com dados reais do usuário */
+async function montarRespostaSaudacao(usuario: Usuario): Promise<string> {
+  const agora = dayjs();
+  const nome = usuario.nome?.split(" ")[0] || "por aí";
+
+  // Saldo atual via aggregate
+  const saldos = await prisma.transacao.groupBy({
+    by: ["tipo"],
+    where: { usuarioId: usuario.id },
+    _sum: { valor: true },
+  });
+  const totalEntradas = saldos.find((s) => s.tipo === "ENTRADA")?._sum.valor ?? 0;
+  const totalSaidas   = saldos.find((s) => s.tipo === "SAIDA")?._sum.valor ?? 0;
+  const saldo = totalEntradas - totalSaidas;
+
+  // Tarefas pendentes
+  const tarefasPendentes = await prisma.tarefa.count({
+    where: { usuarioId: usuario.id, status: "PENDENTE" },
+  });
+
+  // Última transação registrada
+  const ultimaTransacao = await prisma.transacao.findFirst({
+    where: { usuarioId: usuario.id },
+    orderBy: { criadoEm: "desc" },
+    include: { categoria: true },
+  });
+
+  // Gastos do mês atual
+  const inicioMes = agora.startOf("month").toDate();
+  const fimMes    = agora.endOf("month").toDate();
+  const gastosmes = await prisma.transacao.aggregate({
+    where: { usuarioId: usuario.id, tipo: "SAIDA", data: { gte: inicioMes, lte: fimMes } },
+    _sum: { valor: true },
+  });
+  const totalGastosMes = gastosmes._sum.valor ?? 0;
+
+  const ehNovo = !ultimaTransacao;
+
+  // Cabeçalho por horário
+  const hora = agora.hour();
+  const saudacao = hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
+
+  // Bloco de status financeiro (só se tiver dados)
+  let blocoFinanceiro = "";
+  if (!ehNovo) {
+    blocoFinanceiro =
+      `📊 *Seu resumo rápido:*\n` +
+      `💰 Saldo atual: *${formatarValor(saldo)}*\n` +
+      `📉 Gastos este mês: *${formatarValor(totalGastosMes)}*\n` +
+      (tarefasPendentes > 0
+        ? `📝 Tarefas pendentes: *${tarefasPendentes}*\n`
+        : "") +
+      (ultimaTransacao
+        ? `🕐 Último registro: *${ultimaTransacao.descricao}* (${formatarValor(ultimaTransacao.valor)})\n`
+        : "") +
+      "\n";
+  }
+
+  // Bloco de plano
+  let blocoPlano = "";
+  if (usuario.plano === "TRIAL" && usuario.trialExpiraEm) {
+    const diasRestantes = dayjs(usuario.trialExpiraEm).diff(agora, "day");
+    const expiraStr = dayjs(usuario.trialExpiraEm).format("DD/MM");
+    blocoPlano =
+      diasRestantes <= 1
+        ? `⚠️ Seu período de teste *expira hoje* (${expiraStr})! Assine para continuar:\n👉 https://finia.app/assinar\n\n`
+        : `🗓️ Teste gratuito até *${expiraStr}* (${diasRestantes} dias restantes)\n\n`;
+  } else if (usuario.plano === "PREMIUM" && usuario.premiumExpiraEm) {
+    const expiraPremium = dayjs(usuario.premiumExpiraEm).format("DD/MM/YYYY");
+    blocoPlano = `✅ Plano *Premium* ativo até ${expiraPremium}\n\n`;
+  } else if (usuario.plano === "BLOQUEADO") {
+    return (
+      `👋 ${saudacao}, ${nome}!\n\n` +
+      "⛔ Seu acesso está suspenso. Para continuar usando a Lume:\n" +
+      "👉 https://finia.app/assinar"
+    );
+  }
+
+  // Dica contextual inteligente
+  let dica = "";
+  if (ehNovo) {
+    dica =
+      "✨ Para começar, tente:\n" +
+      "• 'Gastei 50 reais no mercado'\n" +
+      "• 'Recebi meu salário de 3000'\n" +
+      "• 'Lembrete: reunião amanhã às 10h'\n" +
+      "• 'Resumo dos meus gastos desta semana'";
+  } else if (tarefasPendentes > 0) {
+    dica = "💡 Você tem tarefas pendentes. Diga *'minhas tarefas'* para ver a lista.";
+  } else if (totalGastosMes > totalEntradas * 0.8 && totalEntradas > 0) {
+    dica = "💡 Seus gastos estão altos este mês. Diga *'resumo do mês'* para ver o detalhamento.";
+  } else {
+    dica =
+      "💡 Posso te ajudar com:\n" +
+      "• 💸 Registrar um gasto ou ganho\n" +
+      "• 📊 Ver resumo financeiro\n" +
+      "• 📝 Criar tarefa ou lembrete\n" +
+      "• 🖥️ Acessar o painel web";
+  }
+
+  return (
+    `👋 ${saudacao}, ${nome}!\n\n` +
+    blocoFinanceiro +
+    blocoPlano +
+    dica
+  );
+}
+
 /** Core */
 export async function processarComando(comando: any, telefone: string) {
   const textoBruto = comando.textoOriginal || comando.descricao || "";
@@ -369,13 +474,13 @@ export async function processarComando(comando: any, telefone: string) {
 
   const { usuario } = await validarPlano(telefone);
 
-  // 🔒 Limite global de mensagens para usuários TRIAL
+  // 🔒 Limite de transações registradas para usuários TRIAL
   if (usuario.plano === "TRIAL") {
-    const totalMensagens = await prisma.interacaoIA.count({
+    const totalTransacoes = await prisma.transacao.count({
       where: { usuarioId: usuario.id },
     });
 
-    if (totalMensagens >= 10) {
+    if (totalTransacoes >= 10) {
       const checkoutUrl = `${process.env.API_URL}/api/stripe/checkout?userId=${usuario.id}`;
 
         return (
@@ -442,26 +547,9 @@ const ehSaudacaoSimples = saudacoes.some((p) => {
   return false;
 });
 
-// ✨ Se for saudação *pura* → envia mensagem de boas-vindas
+// ✨ Se for saudação *pura* → resposta contextual com dados reais do usuário
 if (ehSaudacaoSimples) {
-  const trialFim = usuario.trialExpiraEm
-    ? dayjs(usuario.trialExpiraEm).format("DD/MM")
-    : dayjs().add(3, "day").format("DD/MM");
-
-  return (
-    "👋 Olá! Eu sou a *Lume*, sua assistente financeira. 😊\n\n" +
-    "Você está no seu período de *teste gratuito*!\n" +
-    `🗓️ Ele expira em *${trialFim}*.\n\n` +
-    "Posso te ajudar com:\n" +
-    "• 💸 Registrar um gasto ou ganho\n" +
-    "• 📊 Ver seu resumo financeiro\n" +
-    "• 📝 Criar uma tarefa com horário\n\n" +
-    "Tente enviar algo como:\n" +
-    "• 'Gastei 50 com gasolina'\n" +
-    "• 'Quanto gastei este mês?'\n" +
-    "• 'Lavar o carro amanhã às 13h'\n\n" +
-    "👉 Quando quiser liberar tudo, ative o plano PREMIUM em https://finia.app/assinar"
-  );
+  return await montarRespostaSaudacao(usuario);
 }
 
   // 💰 Palavras relacionadas a finanças

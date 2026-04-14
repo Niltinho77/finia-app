@@ -8,8 +8,21 @@ import { baixarMidiaWhatsApp, transcreverAudio } from "../utils/whatsappMedia.js
 
 export const whatsappRouter = Router();
 
+// 🛡️ Rate limiter em memória: máx. 15 mensagens por minuto por número
+const rateMap = new Map<string, number[]>();
 
-// ✅ Adiciona suporte para GET direto em /whatsapp (usado pela Meta na verificação inicial)
+function isRateLimited(telefone: string): boolean {
+  const agora = Date.now();
+  const janela = 60_000; // 1 minuto
+  const limite = 15;
+  const timestamps = (rateMap.get(telefone) ?? []).filter((t) => agora - t < janela);
+  if (timestamps.length >= limite) return true;
+  timestamps.push(agora);
+  rateMap.set(telefone, timestamps);
+  return false;
+}
+
+// ✅ Verificação do webhook pelo Meta (rota raiz)
 whatsappRouter.get("/", (req: Request, res: Response) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -23,7 +36,6 @@ whatsappRouter.get("/", (req: Request, res: Response) => {
   console.warn("⚠️ Tentativa de verificação inválida (rota raiz):", { mode, token });
   return res.sendStatus(403);
 });
-
 
 /**
  * ✅ GET /whatsapp/webhook — verificação do Meta
@@ -65,6 +77,12 @@ whatsappRouter.post("/webhook", async (req: Request, res: Response) => {
 
           console.log(`📩 Nova mensagem (${normalized.type}) de ${numero}`);
 
+          // 🛡️ Rate limiting
+          if (isRateLimited(numero)) {
+            console.warn(`⚠️ Rate limit atingido para ${numero} — mensagem ignorada`);
+            continue;
+          }
+
           // ⚡ Evita processar duplicadas
           const jaExiste = await prisma.interacaoIA.findUnique({
             where: { messageId },
@@ -76,31 +94,28 @@ whatsappRouter.post("/webhook", async (req: Request, res: Response) => {
 
           // 🎧 Caso seja áudio → baixa e transcreve
           if (normalized.type === "audio") {
-          const audioId = msg.audio?.id;
-          if (audioId) {
-            console.log("🎙️ Recebido áudio. Iniciando download...");
-            const caminho = await baixarMidiaWhatsApp(audioId);
+            const audioId = msg.audio?.id;
+            if (audioId) {
+              console.log("🎙️ Recebido áudio. Iniciando download...");
+              const caminho = await baixarMidiaWhatsApp(audioId);
 
-            try {
-              texto = await transcreverAudio(caminho);
-            } catch (err: any) {
-              console.error("❌ Erro ao processar áudio:", err);
+              try {
+                texto = await transcreverAudio(caminho);
+              } catch (err: any) {
+                console.error("❌ Erro ao processar áudio:", err);
 
-              // 🔹 Se for áudio longo, responde direto e interrompe o fluxo
-              if (err.message?.includes("10 segundos")) {
-                await sendTextWithTemplateFallback(
-                  normalized.from,
-                  "⚠️ O áudio é muito longo! Envie mensagens de até 10 segundos."
-                );
-                console.log("📤 Aviso de áudio longo enviado ao usuário.");
-                continue; // <---- interrompe o processamento dessa mensagem
+                if (err.message?.includes("10 segundos")) {
+                  await sendTextWithTemplateFallback(
+                    numero,
+                    "⚠️ O áudio é muito longo! Envie mensagens de até 10 segundos."
+                  );
+                  continue;
+                }
+
+                texto = "(erro ao transcrever áudio)";
               }
-
-              // outros erros de áudio genéricos
-              texto = "(erro ao transcrever áudio)";
             }
           }
-}
 
           // 👤 Garante que o usuário exista
           const usuario = await prisma.usuario.upsert({
@@ -109,58 +124,86 @@ whatsappRouter.post("/webhook", async (req: Request, res: Response) => {
             create: { telefone: numero },
           });
 
-          // 🧠 Interpreta via IA (texto ou transcrição)
-          const comando = await interpretarMensagem(texto);
+          // 📜 Busca histórico das últimas 5 interações bem-sucedidas para contexto
+          const historicoDb = await prisma.interacaoIA.findMany({
+            where: { usuarioId: usuario.id, sucesso: true },
+            orderBy: { criadoEm: "desc" },
+            take: 5,
+          });
+          const historico = historicoDb
+            .reverse()
+            .filter((i) => i.respostaIA != null)
+            .map((i) => ({
+              entrada: i.entradaTexto,
+              saida: i.respostaIA as string,
+            }));
+
+          // 🧠 Interpreta via IA com contexto de conversa
+          const comando = await interpretarMensagem(texto, historico);
+
+          // ❌ Se a IA falhou completamente, informa o usuário sem criar nada no banco
+          if (!comando) {
+            await sendTextWithTemplateFallback(
+              numero,
+              "🤔 Não consegui entender. Pode reformular de outra forma?"
+            );
+            await prisma.interacaoIA.create({
+              data: {
+                usuarioId: usuario.id,
+                entradaTexto: texto,
+                respostaIA: "null",
+                tipo: "ERRO",
+                messageId,
+                sucesso: false,
+              },
+            });
+            continue;
+          }
 
           // ⚙️ Processa comando no núcleo FinIA
           try {
-  // ⚙️ Processa comando no núcleo FinIA
-  const resposta = await processarComando(
-    { ...comando, textoOriginal: texto },
-    numero
-  );
+            const resposta = await processarComando(
+              { ...comando, textoOriginal: texto },
+              numero
+            );
 
-  // 💾 Registra interação normal (se não deu erro)
-  await prisma.interacaoIA.create({
-    data: {
-      usuarioId: usuario.id,
-      entradaTexto: texto,
-      respostaIA: JSON.stringify(comando),
-      tipo: comando?.tipo?.toUpperCase?.() || "DESCONHECIDO",
-      messageId,
-    },
-  });
+            // 💾 Registra interação bem-sucedida
+            await prisma.interacaoIA.create({
+              data: {
+                usuarioId: usuario.id,
+                entradaTexto: texto,
+                respostaIA: JSON.stringify(comando),
+                tipo: comando?.tipo?.toUpperCase?.() || "OUTRO",
+                messageId,
+              },
+            });
 
-  // 💬 Envia resposta
-  if (resposta) {
-    await sendTextWithTemplateFallback(numero, resposta);
-    console.log("📤 Resposta enviada com sucesso!");
-  }
+            // 💬 Envia resposta
+            if (resposta) {
+              await sendTextWithTemplateFallback(numero, resposta);
+              console.log("📤 Resposta enviada com sucesso!");
+            }
+          } catch (err: any) {
+            const mensagemErro =
+              typeof err.message === "string"
+                ? err.message
+                : "⚠️ Ocorreu um erro inesperado. Tente novamente.";
 
-} catch (err: any) {
-  // 🚨 Captura erros de limite e envia mensagem ao usuário
-  const mensagemErro =
-    typeof err.message === "string"
-      ? err.message
-      : "⚠️ Ocorreu um erro inesperado. Tente novamente.";
+            console.warn("🚫 Interação bloqueada ou erro FinIA:", mensagemErro);
 
-  console.warn("🚫 Interação bloqueada ou erro FinIA:", mensagemErro);
+            await sendTextWithTemplateFallback(numero, mensagemErro);
 
-  await sendTextWithTemplateFallback(numero, mensagemErro);
-
-  // 💾 Loga a interação com status de erro, se quiser auditar
-  await prisma.interacaoIA.create({
-    data: {
-      usuarioId: usuario.id,
-      entradaTexto: texto,
-      respostaIA: mensagemErro,
-      tipo: "ERRO",
-      messageId,
-      sucesso: false,
-    },
-  });
-}
-
+            await prisma.interacaoIA.create({
+              data: {
+                usuarioId: usuario.id,
+                entradaTexto: texto,
+                respostaIA: mensagemErro,
+                tipo: "ERRO",
+                messageId,
+                sucesso: false,
+              },
+            });
+          }
         }
       }
     }
