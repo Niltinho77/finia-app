@@ -361,7 +361,7 @@ async function resumoTransacoes(
 
 /** Monta resposta de saudação contextual com dados reais do usuário */
 async function montarRespostaSaudacao(usuario: Usuario): Promise<string> {
-  const agora = dayjs();
+  const agora = dayjs().tz("America/Sao_Paulo");
   const nome = usuario.nome?.split(" ")[0] || "por aí";
 
   // Saldo atual via aggregate
