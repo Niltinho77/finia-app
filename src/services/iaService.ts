@@ -76,20 +76,12 @@ export async function interpretarMensagem(
   ];
 
   // Adiciona histórico de conversa como contexto (últimas interações)
+  // Mantém o JSON bruto como conteúdo do assistente para que o GPT continue
+  // respondendo no mesmo formato — nunca usar texto livre aqui.
   if (historico && historico.length > 0) {
     for (const item of historico) {
       messages.push({ role: "user", content: item.entrada });
-      // A resposta da IA foi o JSON retornado — passamos como contexto resumido
-      try {
-        const parsed = JSON.parse(item.saida);
-        // Resumo legível em vez do JSON bruto
-        const resumo = parsed.descricao
-          ? `[Entendido: ${parsed.tipo} — "${parsed.descricao}"]`
-          : `[Entendido: ${parsed.tipo}]`;
-        messages.push({ role: "assistant", content: resumo });
-      } catch {
-        messages.push({ role: "assistant", content: item.saida });
-      }
+      messages.push({ role: "assistant", content: item.saida });
     }
   }
 
