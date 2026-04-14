@@ -799,13 +799,19 @@ if (usuario.plano === "TRIAL") {
         const tipoEmoji =
           tipoTransacao === "ENTRADA" ? "📥" : "📤";
 
+        let linkCorrecao = "";
+        try {
+          const magicLink = await gerarDashboardMagicLink(usuario);
+          linkCorrecao = `\n\n⚠️ Lançou algo errado? Acesse o painel para excluir:\n👉 ${magicLink}`;
+        } catch {}
+
         return `✅ *Registrado com sucesso!*
 ${tipoEmoji} *Tipo:* ${
           tipoTransacao === "ENTRADA" ? "Entrada" : "Saída"
         }
 📝 *Descrição:* ${descricao}
 💰 *Valor:* ${formatarValor(valor)}
-🏷️ *Categoria:* ${categoriaEncontrada.nome}`;
+🏷️ *Categoria:* ${categoriaEncontrada.nome}${linkCorrecao}`;
       }
     }
  
@@ -1073,9 +1079,15 @@ ${tipoEmoji} *Tipo:* ${
         let dataFmt = dataTarefa.format("dddd, DD/MM");
         if (horaFinal) dataFmt += ` às ${horaFinal}`;
 
+        let linkCorrecaoTarefa = "";
+        try {
+          const magicLink = await gerarDashboardMagicLink(usuario);
+          linkCorrecaoTarefa = `\n\n⚠️ Lançou algo errado? Acesse o painel para excluir:\n👉 ${magicLink}`;
+        } catch {}
+
         return `📝 *Tarefa adicionada com sucesso!*
 📌 ${descricao}
-🕒 ${dataFmt}`;
+🕒 ${dataFmt}${linkCorrecaoTarefa}`;
       }
 
         }
