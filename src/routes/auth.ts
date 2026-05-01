@@ -1,60 +1,71 @@
 // src/routes/auth.ts
 import { Router } from "express";
 import jwt from "jsonwebtoken";
+import { randomBytes } from "crypto";
+import dayjs from "dayjs";
 import prisma from "../db/client.js";
+import { authMiddleware } from "../middlewares/auth.js";
+import { sendTextWithTemplateFallback } from "../services/whatsappService.js";
 
 const router = Router();
 
+const RESPOSTA_GENERICA_LOGIN = {
+  message:
+    "Se o telefone estiver cadastrado, você receberá um link de acesso pelo WhatsApp em alguns segundos.",
+};
+
 /**
  * POST /api/auth/login
- * Exemplo de corpo: { "telefone": "+5551999999999" }
- * Login tradicional por telefone (sem link mágico).
+ * Body: { "telefone": "+5551999999999" }
+ *
+ * Em vez de logar direto (inseguro — qualquer um que soubesse um telefone
+ * cadastrado entrava na conta), agora apenas envia um magic link de 15 min
+ * pelo WhatsApp. A resposta é genérica e nunca revela se o telefone existe.
  */
 router.post("/login", async (req, res) => {
   const { telefone } = req.body as { telefone?: string };
 
-  if (!telefone) {
-    return res.status(400).json({ message: "Telefone é obrigatório." });
+  // Aceita apenas E.164 simples: + seguido de 10–15 dígitos
+  if (!telefone || !/^\+\d{10,15}$/.test(telefone)) {
+    return res
+      .status(400)
+      .json({ message: "Telefone inválido. Use o formato +5551999999999." });
   }
 
+  // Resposta genérica é enviada SEMPRE — não revela se a conta existe.
+  // O envio do link acontece em background.
+  res.json(RESPOSTA_GENERICA_LOGIN);
+
   try {
-    // procura usuário pelo telefone
     const usuario = await prisma.usuario.findUnique({ where: { telefone } });
+    if (!usuario) return;
 
-    if (!usuario) {
-      return res.status(401).json({ message: "Usuário não encontrado." });
-    }
+    const token = randomBytes(32).toString("hex");
+    const expiraEm = dayjs().add(15, "minute").toDate();
 
-    if (!process.env.JWT_SECRET) {
-      console.error("JWT_SECRET não configurado");
-      return res
-        .status(500)
-        .json({ message: "Configuração interna ausente (JWT_SECRET)." });
-    }
-
-    // gera JWT válido por 7 dias
-    const token = jwt.sign(
-      { userId: usuario.id },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    return res.json({
-      user: {
-        id: usuario.id,
-        nome: usuario.nome,
-        telefone: usuario.telefone,
-        idioma: usuario.idioma,
-        plano: usuario.plano,
-        trialExpiraEm: usuario.trialExpiraEm,
-        premiumExpiraEm: usuario.premiumExpiraEm,
-        criadoEm: usuario.criadoEm,
-      },
-      token,
+    await prisma.dashboardMagicLink.create({
+      data: { usuarioId: usuario.id, token, expiraEm },
     });
+
+    const baseUrl = (
+      process.env.DASHBOARD_URL ||
+      process.env.FRONTEND_URL ||
+      ""
+    ).replace(/\/+$/, "");
+
+    if (!baseUrl) {
+      console.error("⚠️ /login: DASHBOARD_URL e FRONTEND_URL ausentes — magic link não enviado");
+      return;
+    }
+
+    const link = `${baseUrl}/login?token=${encodeURIComponent(token)}`;
+
+    await sendTextWithTemplateFallback(
+      telefone,
+      `🔗 *Acesso ao painel da FinIA*\n\nClique para entrar:\n${link}\n\n⚠️ Este link expira em 15 minutos e só pode ser usado uma vez.`
+    );
   } catch (err) {
-    console.error("Erro em /auth/login:", err);
-    return res.status(500).json({ message: "Erro interno ao fazer login." });
+    console.error("Erro em /auth/login (envio de magic link):", err);
   }
 });
 
@@ -157,9 +168,9 @@ router.post("/magic-login", async (req, res) => {
 /**
  * GET /api/auth/me
  * Retorna o usuário autenticado atual.
- * Requer que o authMiddleware tenha preenchido req.userId.
+ * Protegido por authMiddleware — exige Bearer token válido.
  */
-router.get("/me", async (req, res) => {
+router.get("/me", authMiddleware, async (req, res) => {
   const { userId } = req as any;
   if (!userId) {
     return res.status(401).json({ message: "Não autenticado." });

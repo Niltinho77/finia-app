@@ -35,7 +35,13 @@ app.post(
 
 // ✅ 3. As demais rotas usam JSON normalmente
 app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req: any, _res, buf) => {
+      if (buf && buf.length) req.rawBody = Buffer.from(buf);
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 
 // monta as novas rotas

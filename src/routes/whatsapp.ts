@@ -5,6 +5,7 @@ import { interpretarMensagem } from "../services/iaService.js";
 import { processarComando } from "../services/finiaCore.js";
 import { sendTextWithTemplateFallback } from "../services/whatsappService.js";
 import { baixarMidiaWhatsApp, transcreverAudio } from "../utils/whatsappMedia.js";
+import { validateMetaSignature } from "../middlewares/whatsappSignature.js";
 
 export const whatsappRouter = Router();
 
@@ -56,8 +57,11 @@ whatsappRouter.get("/webhook", (req: Request, res: Response) => {
 
 /**
  * 💬 POST /whatsapp/webhook — recebe e processa mensagens (texto e áudio)
+ *
+ * Protegido por validação HMAC (X-Hub-Signature-256). Sem assinatura válida,
+ * a Meta App Secret não bate e a requisição é rejeitada com 401.
  */
-whatsappRouter.post("/webhook", async (req: Request, res: Response) => {
+whatsappRouter.post("/webhook", validateMetaSignature, async (req: Request, res: Response) => {
   // 🚀 Meta exige resposta imediata
   res.sendStatus(200);
 
@@ -184,20 +188,20 @@ whatsappRouter.post("/webhook", async (req: Request, res: Response) => {
               console.log("📤 Resposta enviada com sucesso!");
             }
           } catch (err: any) {
-            const mensagemErro =
-              typeof err.message === "string"
-                ? err.message
-                : "⚠️ Ocorreu um erro inesperado. Tente novamente.";
+            // Não exponha stack trace / mensagens técnicas no WhatsApp do usuário.
+            // Loga o erro real em servidor, manda mensagem genérica pro cliente.
+            console.error("🚫 Erro ao processar comando FinIA:", err);
 
-            console.warn("🚫 Interação bloqueada ou erro FinIA:", mensagemErro);
+            const mensagemUsuario =
+              "⚠️ Tive um problema ao processar sua mensagem. Tente novamente em instantes.";
 
-            await sendTextWithTemplateFallback(numero, mensagemErro);
+            await sendTextWithTemplateFallback(numero, mensagemUsuario);
 
             await prisma.interacaoIA.create({
               data: {
                 usuarioId: usuario.id,
                 entradaTexto: texto,
-                respostaIA: mensagemErro,
+                respostaIA: (err?.message ?? "erro desconhecido").toString().slice(0, 500),
                 tipo: "ERRO",
                 messageId,
                 sucesso: false,
